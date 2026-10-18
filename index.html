@@ -420,7 +420,7 @@ multiMode=true;$('boxMode').textContent='多选中 · 点击退出';$('boxMode')
  const style=document.createElement('style');style.textContent='.dc-counts{padding:12px 0;margin-top:12px;border-top:1px solid #cbd9ce}.dc-counts h3{margin:0 0 10px}.dc-counts button{margin:4px 6px 4px 0;min-height:44px}.dc-counts p{font-size:13px;line-height:1.5;color:#49695a}';document.head.append(style);
  function status(){message.textContent=active()?'云端统一记账 · 本机缓存 '+new Date(state.cloudCounts.updatedAt).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'})+'。保存验收会同步云端；获取次数需手动点击。':'尚未获取云端次数。首次请在电脑端初始化现有记录。';}
  window.addEventListener('duty-cloud-config',status);status();
- function taskKey(j){return JSON.stringify([j.area,j.label,!!j.temporary]);}
+ function taskKey(j){return JSON.stringify([j.area,j.room||j.label,!!j.temporary]);}
  function row(j,names,rework={}){return {key:taskKey(j),task:j.label,area:j.area,temporary:!!j.temporary,entries:names.map(name=>({name,kind:j.completionKind==='rework'||(!j.temporary&&rework[name])?'rework':j.completionKind==='extra'?'extra':j.room?'dorm':'normal'}))};}
  function localDays(){
   archiveDay();const result={};
