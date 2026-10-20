@@ -199,12 +199,12 @@ function makePerson(n,chip=false,contextId=null){const context=JOBS.find(j=>j.id
 e.onclick=ev=>{ev.stopPropagation();if(context?.temporary&&selected.size){assignTemporary(contextId,[...selected]);return;}if(chip&&!multiMode&&selected.size===1&&!selected.has(n)){swapInto([...selected][0],n);return;}toggle(n);};if(chip){e.ondragover=ev=>{ev.preventDefault();ev.stopPropagation();};e.ondrop=ev=>{ev.preventDefault();ev.stopPropagation();if(context?.temporary){assignTemporary(contextId,dragNames);return;}if(dragNames.length!==1)return tell('交换姓名时请只选1人');swapInto(dragNames[0],n);};}e.ondragstart=ev=>{if(!selected.has(n)){selected.clear();selected.add(n);updateSelection();}dragNames=[...selected].filter(personPresent);ev.dataTransfer.setData('application/x-duty-names',JSON.stringify(dragNames));ev.dataTransfer.effectAllowed='move';};e.ondragend=()=>{dragNames=[];document.querySelectorAll('.over').forEach(e=>e.classList.remove('over'));};return e;}
 function render(){ refreshDormFilters();refreshFixedDormFilters();renderPauseStatus();refreshJobs();syncInspectionDraft();$('auto').disabled=!NAMES.length;$('dailyState').textContent=completedNames().length?'已验收 '+completedNames().length+'人':state.published?'已发布，可继续调整':'草稿';$('fixedTemplate').value=state.fixedTemplate||'';$('fixedTemplate').hidden=!state.fixedDorm;$('deep').checked=state.deep;$('zone2').checked=state.zone2;$('date').value=state.date;$('importInfo').textContent=state.info;$('availableCount').textContent=`可用 ${NAMES.filter(placeable).length} 人`;$('assignedCount').textContent=`已放置 ${Object.values(state.jobs).flat().length} / ${JOBS.reduce((sum,j)=>sum+j.cap,0)} 人`;$('publishState').textContent=state.published?'已确认':'草稿';$('pool').replaceChildren(...visibleNames().map(n=>makePerson(n)));if(!visibleNames().length){const empty=document.createElement('div');empty.className='pool-empty';empty.textContent=NAMES.length?'当前没有符合条件的人员':'先导入找人App学生JS；本软件没有内置名单';$('pool').append(empty);} $('areas').replaceChildren();for(const area of [...new Set(JOBS.map(j=>j.area))]){const section=document.createElement('div');section.className='area';section.dataset.area=area;section.style.scrollMarginTop='90px';const heading=document.createElement('h3');const areaTitle=document.createElement('span');areaTitle.className='area-module-title';areaTitle.textContent=({'教室与走廊':'🏫 ','1号卫生区':'🌿 ','2号卫生区':'🧹 ','宿舍值日':'🛏️ ','临时劳动':'🧰 '}[area]||'📍 ')+area;heading.append(areaTitle);const actions=document.createElement('span');actions.className='area-checks';for(const [label,status] of [['✅ 区域合格','pass'],['🛠️ 区域重做','redo']]){const b=document.createElement('button');b.textContent=label;b.onclick=()=>inspectJobs(JOBS.filter(j=>j.area===area).map(j=>j.id),status);actions.append(b);}if(area==='临时劳动'){const batch=document.createElement('button');batch.textContent='📋 批量安排人员';batch.onclick=()=>openBatchDialog();actions.prepend(batch);}heading.append(actions);section.append(heading);if(area==='临时劳动'){const summary=document.createElement('div');summary.className='temp-summary';const total=JOBS.filter(j=>j.temporary).reduce((v,j)=>v+(state.jobs[j.id]||[]).length,0);summary.textContent='已安排 '+total+' 人次 · 待安排 '+(state.tempPending||[]).length+' 人';if(state.tempPending?.length)summary.textContent+='：'+state.tempPending.join('、');section.append(summary);}const grid=document.createElement('div');grid.className='jobs';for(const j of JOBS.filter(j=>j.area===area)){const card=document.createElement('div');card.className='job';card.classList.toggle('temporary-job',!!j.temporary);card.dataset.job=j.id;card.classList.toggle('wide-job',j.cap>1);card.tabIndex=0;card.setAttribute('role','button');card.setAttribute('aria-label',j.label+'，点击放置选中人员');const title=document.createElement('div');title.className='job-title';title.append(document.createTextNode(j.label));const count=document.createElement('span');count.textContent=`${state.jobs[j.id].length}/${j.cap}`;title.append(count);card.append(title);if(j.temporary){const tools=document.createElement('div');tools.className='temp-tools';const tag=document.createElement('select');tag.setAttribute('aria-label',j.label+'性质');for(const [value,label] of [['rework','🛠️ 处罚／返工'],['normal','🔁 普通值日／替补']]){const option=document.createElement('option');option.value=value;option.textContent=label;tag.append(option);}tag.value=j.completionKind;tag.disabled=!!state.tempDone?.[j.id]?.length;tag.onchange=()=>editTempDefinition(j.id,'completionKind',tag.value);const capLabel=document.createElement('label');capLabel.textContent='人数 ';const capacity=document.createElement('input');capacity.type='number';capacity.min=Math.max(1,state.jobs[j.id].length);capacity.max=20;capacity.value=j.cap;capacity.setAttribute('aria-label',j.label+'人数');capacity.disabled=!!state.tempDone?.[j.id]?.length;capacity.onchange=()=>editTempDefinition(j.id,'cap',capacity.value);capLabel.append(capacity);const add=document.createElement('button');add.textContent='📋 粘贴名单';add.onclick=e=>{e.stopPropagation();openBatchDialog([j.id]);};const del=document.createElement('button');del.textContent='移除区域';del.onclick=e=>{e.stopPropagation();deleteTemporary(j.id);};tools.append(tag,capLabel,add,del);card.append(tools);}const slots=document.createElement('div');slots.className='slots';for(const n of state.jobs[j.id])slots.append(makePerson(n,true,j.id));for(let i=state.jobs[j.id].length;i<j.cap;i++){const slot=document.createElement('span');slot.className='slot';slot.textContent='＋ 放入';slots.append(slot);}card.append(slots);const inspection=draftInspectionStatus(j.id);card.classList.toggle('needs-redo',inspection==='redo');card.classList.toggle('passed',inspection==='pass');const controls=document.createElement('div');controls.className='job-check';controls.onclick=e=>e.stopPropagation();controls.onkeydown=e=>e.stopPropagation();for(const [value,text] of [['pending','待验收'],['pass','合格'],['redo','不合格重做']]){const label=document.createElement('label'),radio=document.createElement('input');radio.type='radio';radio.name='inspection-'+j.id;radio.value=value;radio.checked=inspection===value;radio.disabled=!state.jobs[j.id].length;radio.setAttribute('aria-label',j.label+'：'+text);radio.onchange=()=>inspectJobs([j.id],value);label.append(radio,document.createTextNode(text));controls.append(label);}if(inspectionDraft[j.id]){const note=document.createElement('span');note.className='unsaved';note.textContent='未保存';controls.append(note);}card.append(controls);card.onclick=()=>assign(j.id,[...selected]);card.onkeydown=e=>{if(e.target===card&&(e.key==='Enter'||e.key===' ')){e.preventDefault();assign(j.id,[...selected]);}};card.ondragover=e=>{e.preventDefault();card.classList.add('over');};card.ondragleave=()=>card.classList.remove('over');card.ondrop=e=>{e.preventDefault();card.classList.remove('over');assign(j.id,dragNames);};grid.append(card);}section.append(grid);$('areas').append(section);}
 $('preview').replaceChildren();const h=document.createElement('h3');h.textContent=state.className+' · 值日安排';const d=document.createElement('div');d.className='preview-date';d.textContent=state.date+' · '+(state.published?'已确认':'预览草稿');$('preview').append(h,d);let populated=0;for(const j of JOBS){if(!state.jobs[j.id].length)continue;populated++;const item=document.createElement('div');item.className='preview-item';const label=document.createElement('label');label.textContent=j.label;const names=document.createElement('b');names.textContent=state.jobs[j.id].join('、');item.append(label,names);$('preview').append(item);}if(!populated){const p=document.createElement('div');p.className='preview-empty';p.textContent='点击自动分配，再调整个别岗位。这里同步显示最终安排。';$('preview').append(p);}
-const missing=JOBS.filter(j=>state.jobs[j.id].length<j.cap);$('check').textContent=state.done.length?`当天已验收 ${state.done.length} 人。完成后仍保留公告安排。`:missing.length?`还有 ${missing.length} 个岗位未满。可先试放置；发布前会提示缺口。`:'所有岗位已放满；可云端发布或导出公告JS。';$('doneTitle').textContent=`完成池 · ${completedNames().length}人`;$('doneNames').replaceChildren(...completedNames().map(n=>{const e=document.createElement('span');e.textContent=n+' · 正常 '+(state.counts[n]||0)+' 次 · 返工 '+(state.stats[n]?.rectification||0)+' 次';return e;}));const dirty=Object.keys(inspectionDraft).length;$('saveInspection').disabled=!dirty;$('cancelInspection').disabled=!dirty;if(dirty)$('dailyState').textContent=dirty+'个岗位验收未保存';$('undo').disabled=!history.length;updateSelection();refreshMobileUI();save();}
-function assign(id,names){if(!JOBS.find(j=>j.id===id)?.temporary&&names.some(n=>jobsForName(n).some(j=>j.temporary&&tempComplete(j.id,n))))return tell('临时任务已验收，请先将其改为待验收并保存，或在临时区域选择兼做');if(JOBS.find(j=>j.id===id)?.temporary){assignTemporary(id,names);return;}if(state.done.length){tell('当天已验收；先撤销验收再调整岗位');return;}names=[...new Set(names)].filter(available);if(!names.length){tell('先点选姓名，再点岗位；也可以直接拖入');return;}const job=JOBS.find(j=>j.id===id),target=state.jobs[id],incoming=names.filter(n=>!target.includes(n));if(!incoming.length){tell('所选人员已经在这个岗位');return;}if(incoming.some(n=>!canEnter(n,id))){tell('无法放置：男厕所限男生，宿舍限本宿舍成员');return;}if(incoming.length>job.cap){tell(`选中${incoming.length}人，这个岗位只容纳${job.cap}人，请减少选择`);return;}const free=job.cap-target.length;
+const missing=JOBS.filter(j=>state.jobs[j.id].length<j.cap);$('check').textContent=state.done.length?`当天已验收 ${state.done.length} 人。合格岗位已归档到当天已完成记录，原公告保留。`:missing.length?`还有 ${missing.length} 个岗位未满。可先试放置；发布前会提示缺口。`:'所有岗位已放满；可云端发布或导出公告JS。';$('doneTitle').textContent=`完成池 · ${completedNames().length}人`;$('doneNames').replaceChildren(...completedNames().map(n=>{const e=document.createElement('span');e.textContent=n+' · 正常 '+(state.counts[n]||0)+' 次 · 返工 '+(state.stats[n]?.rectification||0)+' 次';return e;}));const dirty=Object.keys(inspectionDraft).length;$('saveInspection').disabled=!dirty;$('cancelInspection').disabled=!dirty;if(dirty)$('dailyState').textContent=dirty+'个岗位验收未保存';$('undo').disabled=!history.length;updateSelection();refreshMobileUI();save();}
+function assign(id,names){if(!JOBS.find(j=>j.id===id)?.temporary&&names.some(n=>jobsForName(n).some(j=>j.temporary&&tempComplete(j.id,n))))return tell('临时任务已验收，请先将其改为待验收并保存，或在临时区域选择兼做');if(JOBS.find(j=>j.id===id)?.temporary){assignTemporary(id,names);return;}if(names.some(n=>state.done.includes(n))||(state.jobs[id]||[]).some(n=>state.done.includes(n))){tell('该人员或岗位已有完成记录，请通过“更正验收”修改；其他待办可正常调整');return;}names=[...new Set(names)].filter(available);if(!names.length){tell('先点选姓名，再点岗位；也可以直接拖入');return;}const job=JOBS.find(j=>j.id===id),target=state.jobs[id],incoming=names.filter(n=>!target.includes(n));if(!incoming.length){tell('所选人员已经在这个岗位');return;}if(incoming.some(n=>!canEnter(n,id))){tell('无法放置：男厕所限男生，宿舍限本宿舍成员');return;}if(incoming.length>job.cap){tell(`选中${incoming.length}人，这个岗位只容纳${job.cap}人，请减少选择`);return;}const free=job.cap-target.length;
 if(incoming.length>free){if(incoming.length===1&&target.length===1&&jobFor(incoming[0])){const source=jobFor(incoming[0]);if(!canEnter(target[0],source.id)){tell('交换后人员不符合原岗位要求');return;}record();state.jobs[source.id]=state.jobs[source.id].map(n=>n===incoming[0]?target[0]:n);state.jobs[id]=[incoming[0]];}else{tell('岗位已满或空位不足；点名字旁×撤回，单人岗位之间可直接交换');return;}}
 else{record();for(const n of incoming){const source=jobFor(n);if(source)state.jobs[source.id]=state.jobs[source.id].filter(x=>x!==n);}state.jobs[id].push(...incoming);}selected.clear();state.published=false;render();tell(`已放置到${job.label}`);}
-function swapInto(incoming,outgoing){if([incoming,outgoing].some(n=>jobsForName(n).some(j=>j.temporary&&tempComplete(j.id,n))))return tell('临时任务已验收，请先修改验收并保存');if(state.done.length)return tell('当天已验收，请先撤销验收');if(incoming===outgoing)return;const target=jobFor(outgoing),source=jobFor(incoming);if(!target)return;if(!canEnter(incoming,target.id)||source&&!canEnter(outgoing,source.id))return tell('无法交换：男厕所限男生，宿舍限本宿舍成员');record();if(source&&source.id===target.id){state.jobs[target.id]=state.jobs[target.id].map(n=>n===outgoing?incoming:n===incoming?outgoing:n);}else{state.jobs[target.id]=state.jobs[target.id].map(n=>n===outgoing?incoming:n);if(source)state.jobs[source.id]=state.jobs[source.id].map(n=>n===incoming?outgoing:n);}selected.clear();state.published=false;render();tell(source?'已交换两个岗位人员':'已替换，原人员返回待安排池');}
-function removeNames(names){if(names.some(n=>jobsForName(n).some(j=>j.temporary&&tempComplete(j.id,n))))return tell('该人员临时任务已验收，请先修改验收并保存');if(state.done.length){tell('当天已验收；先撤销验收再调整');return;}if(!names.some(jobFor))return;record();for(const j of JOBS)state.jobs[j.id]=state.jobs[j.id].filter(n=>!names.includes(n));for(const n of names)if(state.reworkNames)delete state.reworkNames[n];selected.clear();state.published=false;render();tell('已撤回人员池');}
+function swapInto(incoming,outgoing){if([incoming,outgoing].some(n=>jobsForName(n).some(j=>j.temporary&&tempComplete(j.id,n))))return tell('临时任务已验收，请先修改验收并保存');if([incoming,outgoing].some(n=>state.done.includes(n)))return tell('已完成人员不能交换，请通过“更正验收”修改');if(incoming===outgoing)return;const target=jobFor(outgoing),source=jobFor(incoming);if(!target)return;if(!canEnter(incoming,target.id)||source&&!canEnter(outgoing,source.id))return tell('无法交换：男厕所限男生，宿舍限本宿舍成员');record();if(source&&source.id===target.id){state.jobs[target.id]=state.jobs[target.id].map(n=>n===outgoing?incoming:n===incoming?outgoing:n);}else{state.jobs[target.id]=state.jobs[target.id].map(n=>n===outgoing?incoming:n);if(source)state.jobs[source.id]=state.jobs[source.id].map(n=>n===incoming?outgoing:n);}selected.clear();state.published=false;render();tell(source?'已交换两个岗位人员':'已替换，原人员返回待安排池');}
+function removeNames(names){if(names.some(n=>jobsForName(n).some(j=>j.temporary&&tempComplete(j.id,n))))return tell('该人员临时任务已验收，请先修改验收并保存');if(names.some(n=>state.done.includes(n))){tell('已完成人员不能撤下，请通过“更正验收”修改');return;}if(!names.some(jobFor))return;record();for(const j of JOBS)state.jobs[j.id]=state.jobs[j.id].filter(n=>!names.includes(n));for(const n of names)if(state.reworkNames)delete state.reworkNames[n];selected.clear();state.published=false;render();tell('已撤回人员池');}
 function parseNames(raw){const names=raw.trim().split(/[、，,；;\s]+/).filter(Boolean).filter(n=>n!=='无').map(resolveName);if(new Set(names).size!==names.length)throw Error('名单有重复姓名，请核对');return names;}
 function importText(){if(pasteMode==='rework'){return importReworkText();}try{const text=$('paste').value.trim();if(!NAMES.length)throw Error('先导入学生JS，再粘贴人员');if(!text)throw Error('请先粘贴文字');if(state.done.length)throw Error('当天已验收；请先撤销验收或切换日期');if(!/请假人员\s*[:：]/.test(text))throw Error('这里粘贴完整今日去向；人员／事项文字请点“安排返工”');let absence=null,point=null,info='',filter='ready';if(/请假人员\s*[:：]/.test(text)){const match=text.match(/请假人员\s*[:：]([^。\n\r]*)/);absence=parseNames(match[1]);const total=text.match(/在册人数\s*(\d+)\s*人/),present=text.match(/实到人数\s*(\d+)\s*人/),abs=text.match(/请假\s*(\d+)\s*人/);if(!total||!present||!abs)throw Error('去向内容需包含在册、实到、请假人数与请假名单');if(+total[1]!==NAMES.length||+present[1]+ +abs[1]!==+total[1]||+abs[1]!==absence.length)throw Error('人数与名单不一致，请重新复制完整去向');info=`已识别去向：在册${total[1]}人，在班${present[1]}人，请假${absence.length}人。`;}
 else if(/人员\s*[:：]/.test(text)){const raw=text.split(/人员\s*[:：]/)[1].split(/事项\s*[:：]/)[0].replace(/[。\n\r]+$/g,'');point=parseNames(raw);if(!point.length)throw Error('人员名单为空');filter='point';const note=text.match(/事项\s*[:：]([\s\S]*)/);info=`已识别点人${point.length}人${note?' · '+note[1].trim():''}；已选中可安排人员。`;}
@@ -226,8 +226,8 @@ $('libraryFile').onchange=async e=>{const file=e.target.files[0];if(!file)return
 $('dormFile').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{const payload=parseDataJS(await file.text()),dorm=checkedRooms(payload.dorm||payload);if(!confirm('更新宿舍成员并清空当天安排，是否继续？'))return;record();state.dorm=dorm;state.days={};state.importedJobs=null;state.reworkNames={};state.jobs={};state.done=[];state.tempJobs=[];state.tempDone={};state.tempReceipts={};state.tempPending=[];state.carriedDefs=[];state.carryovers={};state.published=false;selected.clear();render();tell('宿舍成员已更新，请自动分配');}catch(err){tell(err.message);}finally{e.target.value='';}};
 
 
-function archiveDay(){state.days=state.days||{};state.days[state.date]={jobs:JSON.parse(JSON.stringify(state.jobs)),done:[...state.done],absent:[...state.absent],point:[...state.point],published:state.published,deep:state.deep,zone2:state.zone2,presenceDate:state.presenceDate,info:state.info,cloudBase:state.cloudBase||null,fixedTemplate:state.fixedTemplate||'',dormReplacements:state.dormReplacements||[],importedJobs:state.importedJobs||null,reworkNames:state.reworkNames||{},inspections:state.inspections||{},acceptanceReceipts:state.acceptanceReceipts||{},carriedDefs:state.carriedDefs||[],tempJobs:state.tempJobs||[],tempDone:state.tempDone||{},tempReceipts:state.tempReceipts||{},tempPending:state.tempPending||[]};}
-function loadDay(date){const previous={absent:[...state.absent],deep:state.deep,zone2:state.zone2,presenceKnown:!!state.presenceDate};state.date=date;const d=state.days?.[date];Object.assign(state,d||{jobs:{},done:[],absent:previous.absent,point:[],published:false,deep:previous.deep,zone2:previous.zone2,fixedTemplate:'',dormReplacements:[],importedJobs:null,reworkNames:{},presenceDate:previous.presenceKnown?date:'',info:'已沿用最近人员去向；可直接更新去向或自动分配。'});state.cloudBase=d?.cloudBase||null;state.reworkNames=d?.reworkNames||{};state.inspections=d?.inspections||{};state.acceptanceReceipts=d?.acceptanceReceipts||{};state.carriedDefs=d?.carriedDefs||[];state.tempJobs=d?.tempJobs||[];state.tempDone=d?.tempDone||{};state.tempReceipts=d?.tempReceipts||{};state.tempPending=d?.tempPending||[];applyCarryovers();}
+function archiveDay(){if(state.executionDate&&state.executionDate!==state.date)return;state.days=state.days||{};state.days[state.date]={jobs:JSON.parse(JSON.stringify(state.jobs)),done:[...state.done],absent:[...state.absent],point:[...state.point],published:state.published,deep:state.deep,zone2:state.zone2,presenceDate:state.presenceDate,info:state.info,cloudBase:state.cloudBase||null,fixedTemplate:state.fixedTemplate||'',dormReplacements:state.dormReplacements||[],importedJobs:state.importedJobs||null,reworkNames:state.reworkNames||{},inspections:state.inspections||{},acceptanceReceipts:state.acceptanceReceipts||{},carriedDefs:state.carriedDefs||[],tempJobs:state.tempJobs||[],tempDone:state.tempDone||{},tempReceipts:state.tempReceipts||{},tempPending:state.tempPending||[]};}
+function loadDay(date){const previous={absent:[...state.absent],deep:state.deep,zone2:state.zone2,presenceKnown:!!state.presenceDate};state.date=date;const d=state.days?.[date]?JSON.parse(JSON.stringify(state.days[date])):null;Object.assign(state,d||{jobs:{},done:[],absent:previous.absent,point:[],published:false,deep:previous.deep,zone2:previous.zone2,fixedTemplate:'',dormReplacements:[],importedJobs:null,reworkNames:{},presenceDate:previous.presenceKnown?date:'',info:'已沿用最近人员去向；可直接更新去向或自动分配。'});state.cloudBase=d?.cloudBase||null;state.completedRecords=d?.completedRecords||{};state.layoutLocked=!!d?.layoutLocked;state.workspaceDefs=d?.workspaceDefs||null;state.workspaceRoles=d?.workspaceRoles||null;state.workspaceFixed=d?.workspaceFixed||null;state.cloudBase=d?.cloudBase||null;state.reworkNames=d?.reworkNames||{};state.inspections=d?.inspections||{};state.acceptanceReceipts=d?.acceptanceReceipts||{};state.carriedDefs=d?.carriedDefs||[];state.tempJobs=d?.tempJobs||[];state.tempDone=d?.tempDone||{};state.tempReceipts=d?.tempReceipts||{};state.tempPending=d?.tempPending||[];applyCarryovers();}
 
 async function exportAnnouncementFile(payload){const filename=String(payload.className||'班级').replace(/[\\/:*?"<>|]/g,'_')+'_值日公告_'+payload.date+'.js';const text='window.DUTY_BOARD_DATA = '+JSON.stringify(payload,null,2)+';\n';const file=new File([text],filename,{type:'application/javascript;charset=utf-8'});if(true&&typeof navigator.share==='function'&&typeof navigator.canShare==='function'&&navigator.canShare({files:[file]})){try{await navigator.share({files:[file],title:payload.className+'值日公告'});return true;}catch(err){if(err.name==='AbortError'){tell('已取消导出，安排未重新确认');return false;}}}const url=URL.createObjectURL(file);const a=document.createElement('a');a.href=url;a.download=filename;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);return true;}
 function download(filename,text){const url=URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
@@ -354,12 +354,13 @@ $('savePause').onclick=()=>{
  window.DutyCloud={request,ready,open,getConfig:()=>({...config})};
 })();
 
-// Publication date belongs to the workspace; completed work keeps its execution date.
+// Each selected date owns its plan and acceptance. Publication never changes that date.
 (function(){
  'use strict';
- state.executionDate=state.executionDate||state.date;
  const copy=v=>JSON.parse(JSON.stringify(v));
- const hasJobs=()=>Object.values(state.jobs).some(ns=>ns.length);
+ const hasJobs=()=>Object.values(state.jobs||{}).some(ns=>ns.length);
+ const legacyArchive=archiveDay,legacyLoad=loadDay;
+ const correcting=new Set();
  const originalBase=refreshBaseJobs,originalRoles=dormRoles,originalFixed=fixedRoomNames;
  refreshBaseJobs=function(){
   if(!state.workspaceDefs?.length)return originalBase();
@@ -373,50 +374,109 @@ $('savePause').onclick=()=>{
   state.workspaceRoles=copy(roles);state.workspaceFixed=copy(fixed);
  }
  function unpin(){state.workspaceDefs=null;state.workspaceRoles=null;state.workspaceFixed=null;}
- const originalArchive=archiveDay;
- archiveDay=function(){if(state.date===(state.executionDate||state.date))originalArchive();};
- const originalLoad=loadDay;
- loadDay=function(date){unpin();state.layoutLocked=false;originalLoad(date);state.executionDate=date;};
+ function syncCompleted(){
+  const records=state.completedRecords||(state.completedRecords={});
+  for(const j of JOBS){
+   const names=state.jobs[j.id]||[];
+   if(names.length&&inspectionStatus(j.id)==='pass'){
+    if(!records[j.id]?.ledgerKey&&(!records[j.id]||JSON.stringify(records[j.id].names)!==JSON.stringify(names)))records[j.id]=copy({date:state.date,id:j.id,task:j.label,area:j.area,room:j.room||null,temporary:!!j.temporary,completionKind:j.completionKind||'normal',names,reworkNames:state.reworkNames||{}});
+   }else if(!records[j.id]?.ledgerKey)delete records[j.id];
+  }
+  // Detached accepted work stays in the log even if a later fetched plan omits it.
+  for(const [id,row] of Object.entries(records)){if(JOBS.some(j=>j.id===id)||row.ledgerKey)continue;const accepted=row.temporary?(state.tempDone?.[id]||[]):(state.done||[]);if(!row.names.every(n=>accepted.includes(n)))delete records[id];}
+ }
+ archiveDay=function(){
+  if(state.executionDate&&state.executionDate!==state.date)return;
+  syncCompleted();legacyArchive();
+  const day=state.days?.[state.date];if(!day)return;
+  state.days[state.date]=copy({...day,completedRecords:state.completedRecords||{},layoutLocked:!!state.layoutLocked,workspaceDefs:state.workspaceDefs||null,workspaceRoles:state.workspaceRoles||null,workspaceFixed:state.workspaceFixed||null,cloudBase:state.cloudBase?.date===state.date?state.cloudBase:null});
+ };
+ loadDay=function(date){
+  unpin();state.layoutLocked=false;state.completedRecords={};state.cloudBase=null;
+  state.executionDate=date;legacyLoad(date);state.executionDate=date;
+  correcting.clear();inspectionDraft={};inspectionDraftDate=date;
+ };
+ // Old releases allowed a publication date different from the accepted work date.
+ // Keep the accepted original day; never transplant it into the selected next day.
+ function recoverLegacyWorkspace(){
+  if(state.executionDate&&state.executionDate!==state.date){
+   const target=state.date,origin=state.executionDate;
+   state.days=state.days||{};
+   if(!state.days[origin]){state.date=origin;refreshJobs();archiveDay();}
+   loadDay(target);
+  }else state.executionDate=state.date;
+ }
+ recoverLegacyWorkspace();
  const confirmButton=document.createElement('button');confirmButton.id='layout-confirm';confirmButton.className='primary';confirmButton.type='button';$('auto').after(confirmButton);
  const note=document.createElement('div');note.id='layout-note';note.setAttribute('role','status');confirmButton.parentElement.after(note);
- const style=document.createElement('style');style.textContent='.auto-controls{flex-wrap:wrap;gap:8px}.auto-controls #auto,.auto-controls #showRework,.auto-controls #layout-confirm{flex:0 1 auto;max-width:100%;padding:9px 12px}.auto-controls #auto{flex:1 1 180px}#layout-confirm{min-height:44px;white-space:nowrap}#layout-note{padding:7px 16px;color:#496b5b;font-size:13px;line-height:1.5}.layout-locked #areas .person-card{cursor:default}.layout-locked #areas .remove-person{display:none}.layout-locked #pool .person-card{cursor:default}';document.head.append(style);
+ const completed=document.createElement('section');completed.id='completed-records';completed.setAttribute('aria-label','当天已完成记录');
+ const style=document.createElement('style');style.textContent='.auto-controls{flex-wrap:wrap;gap:8px}.auto-controls #auto,.auto-controls #showRework,.auto-controls #layout-confirm{flex:0 1 auto;max-width:100%;padding:9px 12px}.auto-controls #auto{flex:1 1 180px}#layout-confirm{min-height:44px;white-space:nowrap}#layout-note{padding:7px 16px;color:#496b5b;font-size:13px;line-height:1.5}.layout-locked #areas .person-card{cursor:default}.layout-locked #areas .remove-person{display:none}.layout-locked #pool .person-card{cursor:default}#completed-records{margin:12px 0;padding:14px;border:1px solid #b9cdbf;border-radius:14px;background:#f3f8f4}#completed-records h3{margin:0 0 6px;font-size:17px}#completed-records p{margin:6px 0;line-height:1.5;color:#496b5b}#completed-records .completion-row{padding:10px 0;border-top:1px solid #d6e2d9}#completed-records .completion-row button{min-height:40px;margin-top:6px}#areas .job[hidden],#areas .area[hidden],#completed-records[hidden]{display:none!important}';document.head.append(style);
  function canInspect(){
   if(state.date===(state.executionDate||state.date))return true;
-  tell('当前验收仍属于 '+state.executionDate+'。请回到该日期验收，或选定新日期发布后再验收');return false;
+  tell('验收日期不一致，请重新选择当天日期');return false;
  }
- function requireLocked(){if(state.layoutLocked)return true;tell('请先点击“✅ 确认排版”，再选日期发布');return false;}
- function clearAcceptance(){state.done=[];state.tempDone={};state.inspections={};state.acceptanceReceipts={};state.tempReceipts={};inspectionDraft={};}
+ function requireLocked(){if(state.layoutLocked)return true;tell('请先点击“✅ 确认排版”，再发布所选日期');return false;}
  confirmButton.onclick=()=>{
   if(Object.keys(inspectionDraft).length)return tell('先保存或取消验收选择，再确认或重新调整排版');
-  if(state.layoutLocked){record();state.layoutLocked=false;if(state.date!==state.executionDate)clearAcceptance();render();return tell('已解锁，可继续调整；历史完成次数保留在云端');}
-  if(!hasJobs())return tell('请先安排人员');record();pin();state.layoutLocked=true;selected.clear();render();tell('排版已固定，选择发布日期后再发布；大扫除选项保留');
+  if(state.layoutLocked){record();state.layoutLocked=false;render();return tell('已解锁当天待办；已完成记录保持归档');}
+  if(!hasJobs())return tell('请先安排人员');record();pin();state.layoutLocked=true;selected.clear();render();tell('当天排版已固定，可以发布；发布不会计次');
  };
- $('date').setAttribute('aria-label','发布目标日期（切换保留当前排版）');
- $('date').title='只选择发布日期，不清空安排或切换历史表';
+ $('date').setAttribute('aria-label','值日日期（按日期独立保存安排和验收）');
+ $('date').title='切换当天排班与历史记录；新日期不会沿用旧日验收';
  $('date').onchange=()=>{
-  const date=$('date').value;if(window.DutyCounts?.isBusy()){ $('date').value=state.date;return tell('正在同步验收，请稍后选择发布日期');}if(!validDay(date)){$('date').value=state.date;return;}
+  const date=$('date').value;
+  if(window.DutyCounts?.isBusy()){ $('date').value=state.date;return tell('正在同步验收，请稍后切换日期');}
+  if(!validDay(date)){$('date').value=state.date;return;}
   if(date===state.date)return;
-  record();archiveDay();if(hasJobs())pin();else state.executionDate=date;
-  state.date=date;state.published=false;selected.clear();render();tell('发布日期已改为 '+date+'，人员、岗位及大扫除选项均保留');
+  if(Object.keys(inspectionDraft).length&&!confirm('验收修改尚未保存，放弃本次修改并切换日期？')){$('date').value=state.date;return;}
+  record();archiveDay();loadDay(date);window.DutyCounts?.hydrate();selected.clear();render();
+  tell('已切换到 '+date+'；当天安排和已完成记录独立保存');
  };
+ function renderCompleted(){
+  const rows=Object.values(state.completedRecords||{});completed.replaceChildren();completed.hidden=!rows.length;$('areas').append(completed);
+  const title=document.createElement('h3');title.textContent=state.date+' · 已完成记录（'+rows.length+'个岗位）';
+  const help=document.createElement('p');help.textContent='合格任务已归档；切换日期不会改变这些记录或重复计次。';completed.append(title,help);
+  for(const row of rows){
+   const item=document.createElement('div');item.className='completion-row';
+   const task=document.createElement('strong');task.textContent=row.area+' · '+row.task;
+   const names=document.createElement('p');names.textContent=row.names.join('、')+' · 已验收合格';
+   const change=document.createElement('button');change.type='button';change.textContent='更正验收';
+   change.onclick=()=>{
+    if(window.DutyCounts?.isBusy())return tell('正在同步，请稍后');
+    const detached=row.ledgerKey&&(!JOBS.some(j=>j.id===row.id)||JSON.stringify(state.jobs[row.id]||[])!==JSON.stringify(row.names));
+    if(!confirm(detached?'撤回 '+state.date+' 的“'+row.task+'”已完成记录及对应次数？此项原安排已变化，确认后直接同步云端。':'将 '+state.date+' 的“'+row.task+'”改为待验收？需点击“保存验收”后才会撤回该项完成记录和次数。'))return;
+    const job=JOBS.find(j=>j.id===row.id);
+    if(row.ledgerKey&&(!job||JSON.stringify(state.jobs[job.id]||[])!==JSON.stringify(row.names))){window.DutyCounts.removeRecord(row.ledgerKey,state.date).catch(e=>tell('更正未保存：'+e.message));return;}
+    correcting.add(row.id);inspectJobs([row.id],'pending');
+    tell('已选择更正；请保存验收确认，或取消修改');
+   };
+   item.append(task,names,change);completed.append(item);
+  }
+  for(const card of document.querySelectorAll('#areas .job'))card.hidden=!!state.completedRecords?.[card.dataset.job]&&!inspectionDraft[card.dataset.job];
+  for(const area of document.querySelectorAll('#areas>.area'))area.hidden=[...area.querySelectorAll('.job')].every(card=>card.hidden);
+ }
  const originalRender=render;
  render=function(){
-  state.executionDate=state.executionDate||state.date;originalRender();const locked=!!state.layoutLocked;
-  document.body.classList.toggle('layout-locked',locked);
-  confirmButton.textContent=locked?'✏️ 重新调整':'✅ 确认排版';
-  note.textContent=(locked?'🔒 排版已固定，可选任意日期后发布。':'① 自动分配／微调 → ② 确认排版 → ③ 选日期并发布。')+(state.date!==state.executionDate?' 验收记录仍属于 '+state.executionDate+'，发布新日期后才切换。':'');
+  recoverLegacyWorkspace();originalRender();const locked=!!state.layoutLocked;
+  document.body.classList.toggle('layout-locked',locked);confirmButton.textContent=locked?'✏️ 重新调整':'✅ 确认排版';
+  note.textContent=state.date+' · '+(locked?'排版已固定；验收合格后收进已完成记录。':'安排／调整当天待办 → 确认排版 → 发布；验收后按当天留档。');
   for(const id of ['auto','deep','zone2','fixedTemplate','showRework','import','showPaste','importLibrary','importDorm','importFixedDorm','importDuty','managePause']){
    const e=$(id);if(e)e.disabled=locked||(id==='auto'&&!NAMES.length);
   }
   for(const e of document.querySelectorAll('#areas .person-card,#pool .person-card'))e.draggable=!locked&&personPresent(e.dataset.name);
   for(const e of document.querySelectorAll('#areas .temp-tools button,#areas .temp-tools input,#areas .temp-tools select'))if(locked)e.disabled=true;
-  const different=state.date!==state.executionDate;
-  if(different){for(const e of document.querySelectorAll('#areas .job-check input,#areas .area-checks button'))e.disabled=true;$('saveInspection').disabled=true;}
+  for(const id of [...correcting])if(!inspectionDraft[id])correcting.delete(id);
+  renderCompleted();
  };
  function guard(fn){return function(...args){if(state.layoutLocked){tell('排版已固定，请先点“✏️ 重新调整”');return;}return fn(...args);};}
  assign=guard(assign);swapInto=guard(swapInto);removeNames=guard(removeNames);assignTemporary=guard(assignTemporary);removeTemporaryPerson=guard(removeTemporaryPerson);deleteTemporary=guard(deleteTemporary);editTempDefinition=guard(editTempDefinition);openTaskDialog=guard(openTaskDialog);openBatchDialog=guard(openBatchDialog);importText=guard(importText);
  const originalAuto=automatic;automatic=guard(function(){const old={workspaceDefs:state.workspaceDefs,workspaceRoles:state.workspaceRoles,workspaceFixed:state.workspaceFixed},jobs=state.jobs;unpin();const result=originalAuto();if(state.jobs===jobs)Object.assign(state,old);return result;});$('auto').onclick=()=>automatic();$('import').onclick=()=>importText();
- const originalInspect=inspectJobs;inspectJobs=function(...args){if(!canInspect())return;return originalInspect(...args);};
+ const originalInspect=inspectJobs;inspectJobs=function(ids,status){
+  if(!canInspect())return;
+  const editable=ids.filter(id=>inspectionStatus(id)!=='pass'||status==='pass'||correcting.has(id));
+  if(!editable.length)return tell('已完成记录请使用“更正验收”修改');
+  return originalInspect(editable,status);
+ };
  for(const id of ['deep','zone2','fixedTemplate']){
   const element=$(id),handler=element?.onchange;if(!handler)continue;
   element.onchange=function(e){if(state.layoutLocked){render();return tell('请先重新调整排版');}const old={workspaceDefs:state.workspaceDefs,workspaceRoles:state.workspaceRoles,workspaceFixed:state.workspaceFixed},value=state[id];unpin();const result=handler.call(this,e);if(state[id]===value)Object.assign(state,old);return result;};
@@ -426,9 +486,9 @@ $('savePause').onclick=()=>{
  }
  const filePublish=$('publish').onclick;
  $('publish').onclick=function(...args){if(requireLocked())return filePublish.apply(this,args);};
- window.DutyLayout={requireLocked,canInspect,executionDate:()=>state.executionDate||state.date,
-  loaded:date=>{unpin();state.executionDate=date;state.layoutLocked=true;pin();render();},
-  published:date=>{if(date!==state.date)return;if(state.executionDate!==date){clearAcceptance();state.executionDate=date;inspectionDraftDate=date;}window.DutyCounts?.hydrate();render();}
+ window.DutyLayout={requireLocked,canInspect,executionDate:()=>state.date,
+  loaded:date=>{unpin();state.executionDate=date;state.layoutLocked=true;window.DutyCounts?.hydrate();pin();render();},
+  published:date=>{if(date!==state.date)return;window.DutyCounts?.hydrate();render();}
  };
  render();
 })();
@@ -486,7 +546,7 @@ $('savePause').onclick=()=>{
    state.done=[];state.inspections={};state.acceptanceReceipts={};state.tempJobs=[];state.tempDone={};state.tempReceipts={};state.tempPending=[];state.carriedDefs=[];state.dormReplacements=[];state.point=[];
    state.cloudBase={date,revision:entry.revision,scope:cloud.getConfig().scope};state.published=true;
    state.info='已获取云端安排；仅更新本机计划，未计完成次数。'+(state.students.every(s=>s.cloudOnly)?'如需其他替补学生或照片，请导入完整学生JS。':'');
-   selected.clear();inspectionDraft={};render();window.DutyLayout?.loaded(date);setMobileView('jobs');
+   selected.clear();inspectionDraft={};window.DutyCounts?.hydrate();render();window.DutyLayout?.loaded(date);setMobileView('jobs');
    status.textContent=date+' 已获取 · 临时调整后点击「发布」覆盖云端。';tell('已获取已发布安排，未计完成次数；服务器未改变');
    if(window.DutyCounts)try{await window.DutyCounts.refresh({silent:true});}catch(error){status.textContent+=' 次数未更新：'+error.message;}
   }catch(e){status.textContent='获取未成功：'+e.message;tell(status.textContent);}
@@ -565,7 +625,13 @@ $('savePause').onclick=()=>{
  }
  function hydrate(){
   if(!active())return;
-  const rows=state.cloudCounts.ledger.days[window.DutyLayout?.executionDate()||state.date]||[];
+  const rows=state.cloudCounts.ledger.days[state.date]||[];
+  state.completedRecords={};
+  for(const r of rows){
+   const def=JOBS.find(j=>taskKey(j)===r.key);let parts=[];try{parts=JSON.parse(r.key);}catch{}
+   const id=def?.id||'ledger:'+r.key;
+   if(r.entries?.length)state.completedRecords[id]={date:state.date,id,ledgerKey:r.key,task:r.task||def?.label||parts[1]||'已完成任务',area:r.area||def?.area||parts[0]||'值日',temporary:!!r.temporary,names:r.entries.map(e=>e.name),completionKind:r.entries.every(e=>e.kind==='rework')?'rework':'normal'};
+  }
   state.done=rows.filter(r=>!r.temporary).flatMap(r=>r.entries.map(e=>e.name));state.tempDone={};state.acceptanceReceipts={};state.tempReceipts={};state.inspections=state.inspections||{};
   for(const j of JOBS){
    const r=rows.find(r=>r.key===taskKey(j)),names=(state.jobs[j.id]||[]).filter(n=>r?.entries.some(e=>e.name===n));
@@ -637,8 +703,14 @@ $('savePause').onclick=()=>{
  };
  const legacyUndo=$('undo').onclick;
  $('undo').onclick=()=>{if(!active())return legacyUndo();const keep={counts:state.counts,stats:state.stats,dormStats:state.dormStats,cloudCounts:state.cloudCounts};legacyUndo();Object.assign(state,keep);hydrate();render();tell('已撤销本机安排操作；撤销云端验收请选“待验收”并确认保存');};
- $('date').addEventListener('change',()=>{hydrate();render();});
- window.DutyCounts={refresh,hasCurrent:active,hydrate,isBusy:()=>busy};
+ async function removeRecord(key,date){
+  if(busy)throw Error('正在同步，请稍后');
+  if(date!==state.date||Object.keys(inspectionDraft).length)throw Error('请先保存或取消当前验收修改');
+  busy=true;
+  try{const result=await send([{date,changes:[{key,remove:true}]}]);accept(result);tell('已更正原岗位完成记录及对应次数，排班未改变');}
+  finally{busy=false;render();}
+ }
+ window.DutyCounts={refresh,hasCurrent:active,hydrate,removeRecord,isBusy:()=>busy};
  hydrate();render();
 })();
 
