@@ -249,7 +249,7 @@ $('fixedDormFile').onchange=async e=>{try{const file=e.target.files[0];if(!file)
 $('fixedTemplate').onchange=()=>{if(state.done.length){$('fixedTemplate').value=state.fixedTemplate||'';return tell('当天已验收，不能修改宿舍模板');}record();state.fixedTemplate=$('fixedTemplate').value;state.published=false;render();tell('宿舍模板已选择，请点击自动分配应用');};
 
 
-function countOrdinaryDay(ids){const all=JOBS.filter(j=>!j.temporary).flatMap(j=>state.jobs[j.id]||[]);if(new Set(all).size!==all.length)throw Error('同日姓名重复，无法计次');const names=ids.flatMap(id=>state.jobs[id]||[]).filter(n=>!state.done.includes(n));if(!names.length)return false;if(new Set(names).size!==names.length)throw Error('同日姓名重复，无法计次');for(const n of names){state.acceptanceReceipts=state.acceptanceReceipts||{};state.acceptanceReceipts[n]={order:state.acceptanceSerial=(state.acceptanceSerial||0)+1,count:state.counts[n]||0,stat:structuredClone(state.stats[n]||null),dorm:structuredClone(state.dormStats[n]||null)};const job=jobFor(n),stat=state.stats[n]||statTemplate();if(state.reworkNames?.[n]||job.completionKind==='rework'){stat.rectification=Number(stat.rectification||0)+1;stat.lastRectificationDate=[stat.lastRectificationDate||'',state.date].sort().at(-1);state.stats[n]=stat;continue;}if(job.completionKind==='extra'){stat.extra=Number(stat.extra||0)+1;state.stats[n]=stat;continue;}state.counts[n]=(state.counts[n]||0)+1;if(job.room){const dorm=state.dormStats[n]||dormStatTemplate();dorm.count++;dorm.lastDate=[dorm.lastDate||'',state.date].sort().at(-1);state.dormStats[n]=dorm;}else{stat.normal++;if(!stat.lastDate||state.date>=stat.lastDate){stat.lastDate=state.date;stat.lastTask=job.id;}state.stats[n]=stat;}}for(const n of names)state.acceptanceReceipts[n].after=JSON.stringify([state.counts[n]||0,state.stats[n]||null,state.dormStats[n]||null]);state.done=[...new Set([...state.done,...names])];return true;}
+function countOrdinaryDay(ids,onlyNames=null){const all=JOBS.filter(j=>!j.temporary).flatMap(j=>state.jobs[j.id]||[]);if(new Set(all).size!==all.length)throw Error('同日姓名重复，无法计次');const names=ids.flatMap(id=>state.jobs[id]||[]).filter(n=>!state.done.includes(n)&&(!onlyNames||onlyNames.includes(n)));if(!names.length)return false;if(new Set(names).size!==names.length)throw Error('同日姓名重复，无法计次');for(const n of names){state.acceptanceReceipts=state.acceptanceReceipts||{};state.acceptanceReceipts[n]={order:state.acceptanceSerial=(state.acceptanceSerial||0)+1,count:state.counts[n]||0,stat:structuredClone(state.stats[n]||null),dorm:structuredClone(state.dormStats[n]||null)};const job=jobFor(n),stat=state.stats[n]||statTemplate();if(state.reworkNames?.[n]||job.completionKind==='rework'){stat.rectification=Number(stat.rectification||0)+1;stat.lastRectificationDate=[stat.lastRectificationDate||'',state.date].sort().at(-1);state.stats[n]=stat;continue;}if(job.completionKind==='extra'){stat.extra=Number(stat.extra||0)+1;state.stats[n]=stat;continue;}state.counts[n]=(state.counts[n]||0)+1;if(job.room){const dorm=state.dormStats[n]||dormStatTemplate();dorm.count++;dorm.lastDate=[dorm.lastDate||'',state.date].sort().at(-1);state.dormStats[n]=dorm;}else{stat.normal++;if(!stat.lastDate||state.date>=stat.lastDate){stat.lastDate=state.date;stat.lastTask=job.id;}state.stats[n]=stat;}}for(const n of names)state.acceptanceReceipts[n].after=JSON.stringify([state.counts[n]||0,state.stats[n]||null,state.dormStats[n]||null]);state.done=[...new Set([...state.done,...names])];return true;}
 
 function inspectionStatus(id){const names=state.jobs[id]||[];if(!names.length)return 'pending';if(JOBS.find(j=>j.id===id)?.temporary?names.every(n=>tempComplete(id,n)):names.every(n=>state.done.includes(n)))return 'pass';const entry=state.inspections?.[id];return entry&&entry.names===JSON.stringify(names)?entry.status:'pending';}
 function syncInspectionDraft(){if(inspectionDraftDate!==(state.executionDate||state.date)){inspectionDraft={};inspectionDraftDate=state.executionDate||state.date;}for(const [id,entry] of Object.entries(inspectionDraft)){if(entry.names!==JSON.stringify(state.jobs[id]||[])||entry.status===inspectionStatus(id))delete inspectionDraft[id];}}
@@ -293,7 +293,7 @@ $('recognizeBatch').onclick=recognizeBatch;
 $('closeBatch').onclick=()=>$('batchDialog').close();
 $('applyBatch').onclick=()=>{try{const names=recognizeBatch();if(!names)return;const ids=[...$('batchTargets').querySelectorAll('input:checked')].map(e=>e.value);const policy=document.querySelector('input[name=batchPolicy]:checked').value;const result=placeTempPeople(names,ids,policy);const text='已安排 '+result.assigned+' 人，待安排 '+result.waiting.length+' 人'+(result.waiting.length?'：'+result.waiting.join('、')+'。可添加区域；请假、限制或已验收的转岗人员暂不放入。':'。确认劳动完成后，再保存验收。');$('batchResult').textContent=text;tell(text);if(!result.waiting.length)$('batchDialog').close();}catch(err){$('batchResult').textContent=err.message;}};
 function assignTemporary(id,names){try{const busy=names.some(n=>jobsForName(n).some(j=>j.id!==id));if(busy){openBatchDialog([id]);$('batchText').value='人员：'+names.join('、');recognizeBatch();return;}const result=placeTempPeople(names,[id],'transfer');tell('已放入 '+result.assigned+' 人，待安排 '+result.waiting.length+' 人');}catch(err){tell(err.message);}}
-function countCurrentDay(ids=JOBS.map(j=>j.id)){const ordinary=ids.filter(id=>!JOBS.find(j=>j.id===id)?.temporary);let changed=ordinary.length?countOrdinaryDay(ordinary):false;for(const id of ids.filter(id=>JOBS.find(j=>j.id===id)?.temporary)){const j=JOBS.find(j=>j.id===id);state.tempDone=state.tempDone||{};state.tempReceipts=state.tempReceipts||{};state.tempReceipts[id]=state.tempReceipts[id]||{};for(const n of (state.jobs[id]||[]).filter(n=>!tempComplete(id,n))){const receipt={order:state.acceptanceSerial=(state.acceptanceSerial||0)+1,count:state.counts[n]||0,stat:structuredClone(state.stats[n]||null),dorm:structuredClone(state.dormStats[n]||null)};const stat=state.stats[n]||statTemplate();if(j.completionKind==='rework'){stat.rectification=Number(stat.rectification||0)+1;stat.lastRectificationDate=[stat.lastRectificationDate||'',state.date].sort().at(-1);}else{state.counts[n]=(state.counts[n]||0)+1;stat.normal=Number(stat.normal||0)+1;if(!stat.lastDate||state.date>=stat.lastDate){stat.lastDate=state.date;stat.lastTask=id;}}state.stats[n]=stat;receipt.after=JSON.stringify([state.counts[n]||0,state.stats[n]||null,state.dormStats[n]||null]);state.tempReceipts[id][n]=receipt;(state.tempDone[id]||=[]).push(n);changed=true;}}return changed;}
+function countCurrentDay(ids=JOBS.map(j=>j.id),onlyNames=null,reworkOnly=[]){const ordinary=ids.filter(id=>!JOBS.find(j=>j.id===id)?.temporary);let changed=ordinary.length?countOrdinaryDay(ordinary,onlyNames):false;for(const id of ids.filter(id=>JOBS.find(j=>j.id===id)?.temporary)){const j=JOBS.find(j=>j.id===id);state.tempDone=state.tempDone||{};state.tempReceipts=state.tempReceipts||{};state.tempReceipts[id]=state.tempReceipts[id]||{};for(const n of (state.jobs[id]||[]).filter(n=>!tempComplete(id,n)&&(!onlyNames||onlyNames.includes(n)))){const receipt={order:state.acceptanceSerial=(state.acceptanceSerial||0)+1,count:state.counts[n]||0,stat:structuredClone(state.stats[n]||null),dorm:structuredClone(state.dormStats[n]||null)};const stat=state.stats[n]||statTemplate();if(j.completionKind==='rework'||reworkOnly.includes(n)){stat.rectification=Number(stat.rectification||0)+1;stat.lastRectificationDate=[stat.lastRectificationDate||'',state.date].sort().at(-1);}else{state.counts[n]=(state.counts[n]||0)+1;stat.normal=Number(stat.normal||0)+1;if(!stat.lastDate||state.date>=stat.lastDate){stat.lastDate=state.date;stat.lastTask=id;}}state.stats[n]=stat;receipt.after=JSON.stringify([state.counts[n]||0,state.stats[n]||null,state.dormStats[n]||null]);state.tempReceipts[id][n]=receipt;(state.tempDone[id]||=[]).push(n);changed=true;}}return changed;}
 function commitTempInspection(id,status){const j=JOBS.find(j=>j.id===id);if(status==='pass'){if(inspectionStatus(id)==='redo'){const def=tempDefinition(id);if(def)def.completionKind='rework';j.completionKind='rework';}countCurrentDay([id]);}else{for(const n of state.tempDone?.[id]||[]){const receipt=state.tempReceipts?.[id]?.[n];if(!receipt||receipt.after!==JSON.stringify([state.counts[n]||0,state.stats[n]||null,state.dormStats[n]||null]))throw Error('该人员已有其他完成记录，无法直接撤回；本次未保存');state.counts[n]=receipt.count;if(receipt.stat)state.stats[n]=structuredClone(receipt.stat);else delete state.stats[n];if(receipt.dorm)state.dormStats[n]=structuredClone(receipt.dorm);else delete state.dormStats[n];}if(state.tempDone)delete state.tempDone[id];if(state.tempReceipts)delete state.tempReceipts[id];}state.inspections=state.inspections||{};state.inspections[id]={status,names:JSON.stringify(state.jobs[id])};queueNextDay([id],status);}
 
 function importReworkText(){openBatchDialog();}
@@ -437,8 +437,9 @@ $('savePause').onclick=()=>{
   const records=state.completedRecords||(state.completedRecords={});
   for(const j of JOBS){
    const names=state.jobs[j.id]||[];
-   if(names.length&&inspectionStatus(j.id)==='pass'){
-    if(!records[j.id]?.ledgerKey&&(!records[j.id]||JSON.stringify(records[j.id].names)!==JSON.stringify(names)))records[j.id]=copy({date:state.date,id:j.id,task:j.label,area:j.area,room:j.room||null,temporary:!!j.temporary,completionKind:j.completionKind||'normal',names,reworkNames:state.reworkNames||{}});
+   const passed=names.filter(n=>j.temporary?tempComplete(j.id,n):state.done.includes(n));
+   if(passed.length){
+    if(!records[j.id]?.ledgerKey&&(!records[j.id]||JSON.stringify(records[j.id].names)!==JSON.stringify(passed)))records[j.id]=copy({date:state.date,id:j.id,task:j.label,area:j.area,room:j.room||null,temporary:!!j.temporary,completionKind:j.completionKind||'normal',names:passed,reworkNames:state.reworkNames||{}});
    }else if(!records[j.id]?.ledgerKey)delete records[j.id];
   }
   // Detached accepted work stays in the log even if a later fetched plan omits it.
@@ -494,7 +495,7 @@ $('savePause').onclick=()=>{
  function renderCompleted(){
   const rows=Object.values(state.completedRecords||{});completed.replaceChildren();completed.hidden=!rows.length;$('areas').append(completed);
   const title=document.createElement('h3');title.textContent=state.date+' · 已完成记录（'+rows.length+'个岗位）';
-  const help=document.createElement('p');help.textContent='合格任务已归档；切换日期不会改变这些记录或重复计次。';completed.append(title,help);
+  const help=document.createElement('p');help.textContent='合格人员已归档；同岗未合格者继续留在待办。切换日期不重复计次。';completed.append(title,help);
   for(const row of rows){
    const item=document.createElement('div');item.className='completion-row';
    const task=document.createElement('strong');task.textContent=row.area+' · '+row.task;
@@ -502,6 +503,7 @@ $('savePause').onclick=()=>{
    const change=document.createElement('button');change.type='button';change.textContent='更正验收';
    change.onclick=()=>{
     if(window.DutyCounts?.isBusy())return tell('正在同步，请稍后');
+    if(window.DutyIndividuals&&JOBS.some(j=>j.id===row.id)&&row.names.every(n=>(state.jobs[row.id]||[]).includes(n))){window.DutyIndividuals.open(row.id);return;}
     const detached=row.ledgerKey&&(!JOBS.some(j=>j.id===row.id)||JSON.stringify(state.jobs[row.id]||[])!==JSON.stringify(row.names));
     if(!confirm(detached?'撤回 '+state.date+' 的“'+row.task+'”已完成记录及对应次数？此项原安排已变化，确认后直接同步云端。':'将 '+state.date+' 的“'+row.task+'”改为待验收？需点击“保存验收”后才会撤回该项完成记录和次数。'))return;
     const job=JOBS.find(j=>j.id===row.id);
@@ -511,7 +513,7 @@ $('savePause').onclick=()=>{
    };
    item.append(task,names,change);completed.append(item);
   }
-  for(const card of document.querySelectorAll('#areas .job'))card.hidden=!!state.completedRecords?.[card.dataset.job]&&!inspectionDraft[card.dataset.job];
+  for(const card of document.querySelectorAll('#areas .job'))card.hidden=!!state.completedRecords?.[card.dataset.job]&&inspectionStatus(card.dataset.job)==='pass'&&!inspectionDraft[card.dataset.job];
   for(const area of document.querySelectorAll('#areas>.area'))area.hidden=[...area.querySelectorAll('.job')].every(card=>card.hidden);
  }
  const originalRender=render;
@@ -550,6 +552,115 @@ $('savePause').onclick=()=>{
   published:date=>{if(date!==state.date)return;window.DutyCounts?.hydrate();render();}
  };
  render();
+})();
+
+// Individual results share the existing date, draft and cloud ledger transaction.
+(function(){
+ 'use strict';
+ const copy=v=>JSON.parse(JSON.stringify(v));
+ const valid=s=>['pending','pass','redo'].includes(s);
+ const names=id=>state.jobs[id]||[];
+ const accepted=(id,n)=>JOBS.find(j=>j.id===id)?.temporary?tempComplete(id,n):state.done.includes(n);
+ function person(id,n){
+  if(accepted(id,n))return 'pass';
+  const e=state.inspections?.[id];
+  if(e?.names!==JSON.stringify(names(id)))return 'pending';
+  return e.people?(e.people[n]==='redo'?'redo':'pending'):(e.status==='redo'?'redo':'pending');
+ }
+ function people(id,entry){return Object.fromEntries(names(id).map(n=>[n,entry?.people?.[n]||entry?.status||person(id,n)]));}
+ function aggregate(p){const values=Object.values(p);return values.length&&values.every(s=>s===values[0])?values[0]:'mixed';}
+ inspectionStatus=id=>names(id).length?aggregate(people(id)):'pending';
+ draftInspectionStatus=id=>inspectionDraft[id]?aggregate(people(id,inspectionDraft[id])):inspectionStatus(id);
+ syncInspectionDraft=function(){
+  if(inspectionDraftDate!==(state.executionDate||state.date)){inspectionDraft={};inspectionDraftDate=state.executionDate||state.date;}
+  for(const [id,e] of Object.entries(inspectionDraft))if(e.names!==JSON.stringify(names(id))||JSON.stringify(people(id,e))===JSON.stringify(people(id)))delete inspectionDraft[id];
+ };
+ function stage(id,results){
+  if(window.DutyCounts?.isBusy())return tell('正在同步，请稍后');
+  if(window.DutyLayout&&!window.DutyLayout.canInspect())return;
+  if(!JOBS.some(j=>j.id===id)||!names(id).length)return;
+  if(names(id).some(n=>!valid(results[n])))throw Error('每位学生都需选择验收结果');
+  syncInspectionDraft();inspectionDraft[id]={names:JSON.stringify(names(id)),people:{...results},status:aggregate(results)};
+  syncInspectionDraft();render();
+ }
+ // Group controls remain a shortcut; individual controls provide explicit correction.
+ const groupInspect=inspectJobs;
+ inspectJobs=function(ids,status){
+  if(!valid(status))return;
+  // Preserve the layout layer's completed-record correction guard.
+  groupInspect(ids,status);
+  for(const id of ids)if(inspectionDraft[id])inspectionDraft[id].people=Object.fromEntries(names(id).map(n=>[n,status]));
+  render();
+ };
+ function plan(id,entry){
+  const results=people(id,entry),j=JOBS.find(j=>j.id===id);
+  return {results,pass:names(id).filter(n=>results[n]==='pass'),redo:names(id).filter(n=>results[n]==='redo'),
+   rework:names(id).filter(n=>results[n]==='pass'&&(person(id,n)==='redo'||state.inspections?.[id]?.rework?.includes(n)||j.completionKind==='rework'||!j.temporary&&state.reworkNames?.[n]===id))};
+ }
+ function remember(id,p){
+  state.inspections||={};state.inspections[id]={names:JSON.stringify(names(id)),people:copy(p.results),rework:[...p.rework],status:aggregate(p.results)};
+  state.carryovers||={};const key=state.date+':'+id;
+  if(!p.redo.length)delete state.carryovers[key];
+  else {const def=JOBS.find(j=>j.id===id);state.carryovers[key]={sourceDate:state.date,targetDate:nextDutyDate(state.date),def:{...def,...(def.temporary?{completionKind:'rework'}:{})},names:[...p.redo]};}
+ }
+ function commit(id,p){
+  const j=JOBS.find(j=>j.id===id),withdraw=names(id).filter(n=>accepted(id,n)&&!p.pass.includes(n));
+  const receipt=n=>j.temporary?state.tempReceipts?.[id]?.[n]:state.acceptanceReceipts?.[n];
+  // Reverse in receipt order, so overlapping temporary tasks can be corrected atomically.
+  withdraw.sort((a,b)=>(receipt(b)?.order||0)-(receipt(a)?.order||0));
+  for(const n of withdraw){
+   const r=receipt(n);if(!r||r.after!==JSON.stringify([state.counts[n]||0,state.stats[n]||null,state.dormStats[n]||null]))throw Error('该人员已有后续完成记录，不能直接撤回；本次未保存');
+   state.counts[n]=r.count;if(r.stat)state.stats[n]=copy(r.stat);else delete state.stats[n];if(r.dorm)state.dormStats[n]=copy(r.dorm);else delete state.dormStats[n];
+   if(j.temporary){state.tempDone[id]=state.tempDone[id].filter(x=>x!==n);delete state.tempReceipts[id][n];}
+   else {state.done=state.done.filter(x=>x!==n);delete state.acceptanceReceipts[n];}
+  }
+  state.reworkNames||={};if(!j.temporary)for(const n of p.rework)state.reworkNames[n]=id;
+  countCurrentDay([id],p.pass,p.rework);remember(id,p);
+ }
+ saveInspection=function(){
+  syncInspectionDraft();const entries=Object.entries(inspectionDraft);if(!entries.length)return tell('没有待保存的验收修改');
+  const before=JSON.stringify(state),plans=entries.map(([id,e])=>[id,plan(id,e)]);
+  try{
+   plans.sort(([a],[b])=>Math.max(0,...names(b).map(n=>state.tempReceipts?.[b]?.[n]?.order||state.acceptanceReceipts?.[n]?.order||0))-Math.max(0,...names(a).map(n=>state.tempReceipts?.[a]?.[n]?.order||state.acceptanceReceipts?.[n]?.order||0)));
+   for(const [id,p] of plans)commit(id,p);
+   history.push(before);if(history.length>30)history.shift();inspectionDraft={};selected.clear();render();tell('个人验收已保存；仅合格者计次，仅不合格者安排次日重做');
+  }catch(e){state=JSON.parse(before);render();tell(e.message);}
+ };
+ $('saveInspection').onclick=saveInspection;
+ const dialog=document.createElement('dialog');dialog.className='individual-dialog';dialog.setAttribute('aria-label','个人验收');
+ const title=document.createElement('h3'),help=document.createElement('p'),list=document.createElement('div'),apply=document.createElement('button'),cancel=document.createElement('button');
+ apply.type=cancel.type='button';apply.textContent='暂存个人结果';apply.className='primary';cancel.textContent='取消';cancel.onclick=()=>dialog.close();dialog.append(title,help,list,apply,cancel);document.body.append(dialog);
+ function open(id){
+  if(window.DutyCounts?.isBusy())return tell('正在同步，请稍后');
+  const j=JOBS.find(j=>j.id===id);if(!j)return;title.textContent=j.label+' · 个人验收';help.textContent='只调整需要处理的人。暂存后，点击“确认保存验收”生效。';list.replaceChildren();
+  for(const n of names(id)){
+   const label=document.createElement('label'),select=document.createElement('select');label.append(document.createTextNode(n+' '));select.dataset.name=n;select.setAttribute('aria-label',n+'验收结果');
+   for(const [value,text] of [['pending','待验收'],['pass','合格'],['redo','不合格重做']]){const o=document.createElement('option');o.value=value;o.textContent=text;select.append(o);}
+   select.value=people(id,inspectionDraft[id])[n];label.append(select);list.append(label);
+  }
+  apply.onclick=()=>{
+   const results=Object.fromEntries([...list.querySelectorAll('select')].map(s=>[s.dataset.name,s.value]));
+   if(names(id).some(n=>accepted(id,n)&&results[n]!=='pass')&&!confirm('本次会更正所选人员的已完成记录，并撤回对应次数；其他人的记录保留。继续暂存吗？'))return;
+   stage(id,results);dialog.close();tell('个人结果已暂存，点击“确认保存验收”后生效');
+  };dialog.showModal();
+ }
+ const held=heldRework;heldRework=id=>[...new Set([...held(id),...names(id).filter(n=>person(id,n)==='redo'&&personPresent(n))])];
+ const baseRender=render;
+ render=function(){
+  baseRender();
+  for(const card of document.querySelectorAll('#areas .job')){
+   const id=card.dataset.job;if(!names(id).length)continue;
+   const b=document.createElement('button');b.type='button';b.className='individual-open';b.textContent='👤 个人验收';b.disabled=!!window.DutyCounts?.isBusy();b.onclick=e=>{e.stopPropagation();open(id);};card.querySelector('.job-check').append(b);
+   for(const chip of card.querySelectorAll('.person-card')){const result=people(id,inspectionDraft[id])[chip.dataset.name];const badge=document.createElement('span');badge.className='individual-status';badge.textContent=({pass:'已合格',redo:'需重做',pending:'待验收'})[result];chip.querySelector('.person-details').append(badge);}
+  }
+  for(const item of document.querySelectorAll('#completed-records .completion-row')){
+   const row=Object.values(state.completedRecords||{})[[...item.parentElement.querySelectorAll('.completion-row')].indexOf(item)];
+   if(!row||!JOBS.some(j=>j.id===row.id)||!row.names.every(n=>names(row.id).includes(n)))continue;
+   const b=document.createElement('button');b.type='button';b.textContent='👤 个人更正';b.onclick=()=>open(row.id);item.append(b);
+  }
+ };
+ const style=document.createElement('style');style.textContent='.individual-dialog{max-width:480px;width:calc(100% - 40px);border:1px solid #b9cdbf;border-radius:14px;padding:20px}.individual-dialog p{font-size:14px;line-height:1.6}.individual-dialog label{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:12px 0}.individual-dialog select,.individual-dialog button,.individual-open{min-height:44px}.individual-dialog button{margin:8px 8px 0 0}.individual-status{display:block;font-size:12px;color:#416851}.individual-open{margin-top:4px}';document.head.append(style);
+ window.DutyIndividuals={person,people,plan,remember,stage,open};render();
 })();
 
 // Both editors manually fetch remote plans. Opening either editor never fetches or publishes.
@@ -679,7 +790,7 @@ $('savePause').onclick=()=>{
     const room=id.startsWith('dorm:')?id.slice(5):task?.room;
     const area=room?'宿舍值日':({'classroom':'教室与走廊','zone1':'1号卫生区','zone2':'2号卫生区'}[task?.area]||task?.area||'教室与走廊');
     const j={...task,id,room,label:room||task?.label||id,area,completionKind:d.jobKinds?.[id]||task?.completionKind};
-    const accepted=names.filter(n=>j.temporary?(d.tempDone?.[id]||[]).includes(n):(d.done||[]).includes(n));if(accepted.length)rows.push(row(j,accepted,d.reworkNames));
+    const accepted=names.filter(n=>j.temporary?(d.tempDone?.[id]||[]).includes(n):(d.done||[]).includes(n));if(accepted.length){const r=row(j,accepted,d.reworkNames);for(const e of r.entries)if(d.inspections?.[id]?.rework?.includes(e.name))e.kind='rework';rows.push(r);}
    }
    if(rows.length)result[date]=rows;
   }
@@ -698,7 +809,12 @@ $('savePause').onclick=()=>{
   for(const j of JOBS){
    const r=rows.find(r=>r.key===taskKey(j)),names=(state.jobs[j.id]||[]).filter(n=>r?.entries.some(e=>e.name===n));
    if(j.temporary)state.tempDone[j.id]=names;else state.done.push(...names);
-   if(names.length&&names.length===(state.jobs[j.id]||[]).length)state.inspections[j.id]={status:'pass',names:JSON.stringify(state.jobs[j.id])};
+   if(window.DutyIndividuals){
+    const old=state.inspections[j.id],same=old?.names===JSON.stringify(state.jobs[j.id]||[]);
+    const people=Object.fromEntries((state.jobs[j.id]||[]).map(n=>[n,names.includes(n)?'pass':same&&(old.people?.[n]==='redo'||!old.people&&old.status==='redo')?'redo':'pending']));
+    const values=Object.values(people);state.inspections[j.id]={names:JSON.stringify(state.jobs[j.id]||[]),people,rework:(r?.entries||[]).filter(e=>e.kind==='rework').map(e=>e.name),status:values.length&&values.every(s=>s===values[0])?values[0]:'mixed'};
+   }
+   else if(names.length&&names.length===(state.jobs[j.id]||[]).length)state.inspections[j.id]={status:'pass',names:JSON.stringify(state.jobs[j.id])};
    else if(state.inspections[j.id]?.status==='pass')delete state.inspections[j.id];
   }
   state.done=[...new Set(state.done)];
@@ -747,11 +863,20 @@ $('savePause').onclick=()=>{
   if(busy)return tell('正在同步，请稍后');
   if(!cloud.ready())return tell('请先连接云端，再保存验收；当前选择仍保留');
   syncInspectionDraft();const entries=Object.entries(inspectionDraft);if(!entries.length)return tell('没有待保存的验收修改');
-  const changes=entries.map(([id,e])=>{const j=JOBS.find(j=>j.id===id);return e.status==='pass'?row({...j,completionKind:inspectionStatus(id)==='redo'?'rework':j.completionKind},state.jobs[id],state.reworkNames):{key:taskKey(j),remove:true};});
+  const plans=window.DutyIndividuals?entries.map(([id,e])=>[id,window.DutyIndividuals.plan(id,e)]):null;
+  const changes=entries.map(([id,e],i)=>{
+   const j=JOBS.find(j=>j.id===id);if(!plans)return e.status==='pass'?row({...j,completionKind:inspectionStatus(id)==='redo'?'rework':j.completionKind},state.jobs[id],state.reworkNames):{key:taskKey(j),remove:true};
+   const p=plans[i][1],r=row(j,p.pass,state.reworkNames),old=state.cloudCounts.ledger.days[state.date]?.find(x=>x.key===r.key);
+   for(const e of r.entries){const prior=old?.entries.find(x=>x.name===e.name);if(prior)e.kind=prior.kind;else if(p.rework.includes(e.name))e.kind='rework';}
+   // A fetched plan can change the roster; preserve older accepted people outside it.
+   for(const e of old?.entries||[])if(!state.jobs[id].includes(e.name))r.entries.push(e);
+   return r.entries.length?r:{key:r.key,remove:true};
+  });
   const date=state.date,draft=JSON.stringify(inspectionDraft),jobsSnapshot=JSON.stringify(state.jobs);busy=true;$('saveInspection').disabled=true;
   try{
    const result=await send([{date,changes}]);
-   if(state.date===date&&JSON.stringify(state.jobs)===jobsSnapshot){state.inspections=state.inspections||{};state.reworkNames=state.reworkNames||{};for(const [id,e] of entries){const j=JOBS.find(j=>j.id===id);if(e.status==='pass'&&inspectionStatus(id)==='redo'){if(j.temporary){const def=tempDefinition(id);if(def)def.completionKind='rework';}else for(const n of state.jobs[id])state.reworkNames[n]=id;}state.inspections[id]={status:e.status,names:JSON.stringify(state.jobs[id])};queueNextDay([id],e.status);}}
+   if(plans&&state.date===date&&JSON.stringify(state.jobs)===jobsSnapshot){for(const [id,p] of plans)window.DutyIndividuals.remember(id,p);}
+   else if(state.date===date&&JSON.stringify(state.jobs)===jobsSnapshot){state.inspections=state.inspections||{};state.reworkNames=state.reworkNames||{};for(const [id,e] of entries){const j=JOBS.find(j=>j.id===id);if(e.status==='pass'&&inspectionStatus(id)==='redo'){if(j.temporary){const def=tempDefinition(id);if(def)def.completionKind='rework';}else for(const n of state.jobs[id])state.reworkNames[n]=id;}state.inspections[id]={status:e.status,names:JSON.stringify(state.jobs[id])};queueNextDay([id],e.status);}}
    if(state.date===date&&JSON.stringify(inspectionDraft)===draft)inspectionDraft={};accept(result);tell('验收已保存到云端，正常／返工次数已统一更新');
   }catch(e){message.textContent='验收未确认同步：'+e.message;tell(message.textContent+'；当前选择保留');}
   finally{busy=false;render();}
