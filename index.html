@@ -948,7 +948,7 @@ $('savePause').onclick=()=>{
  function reviewPeople(card,id){const j=JOBS.find(j=>j.id===id);if(!j||!(state.jobs[id]||[]).length)return;const controls=card.querySelector('.job-check');const button=create('button','du-review-open','验收');button.setAttribute('aria-expanded',String(reviewOpen===id));button.onclick=e=>{e.stopPropagation();reviewOpen=reviewOpen===id?null:id;decorate();};card.querySelector('.job-title').append(button);card.classList.toggle('du-reviewing',reviewOpen===id);
   if(reviewOpen!==id||state.jobs[id].length<2)return;const list=create('div','du-person-review');for(const n of state.jobs[id]){const row=create('div','du-review-row'),name=create('strong','',n),choices=create('div','du-results');for(const [value,label] of [['pending','待验收'],['pass','合格'],['redo','重做']]){const b=create('button','',label);b.type='button';b.setAttribute('aria-label',n+'：'+label);const valueNow=window.DutyIndividuals.people(id,inspectionDraft[id])[n];b.setAttribute('aria-pressed',String(valueNow===value));b.disabled=busy();b.onclick=e=>{e.stopPropagation();if(valueNow===value)return;if((j.temporary?tempComplete(id,n):state.done.includes(n))&&value!=='pass'&&!confirm('更正 '+n+' 的已完成结果？保存验收后将撤回对应次数。'))return;const results=window.DutyIndividuals.people(id,inspectionDraft[id]);results[n]=value;window.DutyIndividuals.stage(id,results);};choices.append(b);}row.append(name,choices);list.append(row);}controls.after(list);
  }
- function decorate(){for(const card of document.querySelectorAll('#areas .job')){const id=card.dataset.job;card.querySelectorAll('.du-review-open,.du-person-review').forEach(e=>e.remove());const pick=card.querySelector('.mobile-pick');if(pick){pick.textContent=(state.jobs[id]||[]).length?'调整':'选人';pick.onclick=e=>{e.stopPropagation();openPicker(id);};}card.classList.toggle('du-recent',id===recentJob);for(const chip of card.querySelectorAll('.person-card')){const n=chip.dataset.name;chip.onclick=e=>{e.stopPropagation();openPicker(id,n);};chip.draggable=false;const remove=chip.querySelector('.remove-person');if(remove){const original=remove.onclick;remove.onclick=e=>{e.stopPropagation();if(canEdit())original(e);};}}card.onclick=e=>{if(e?.target?.closest('input,select,label,.temp-tools,.job-property,.person-property-open'))return;if((state.jobs[id]||[]).length){reviewOpen=reviewOpen===id?null:id;decorate();}else openPicker(id);};card.onkeydown=e=>{if(e.target===card&&['Enter',' '].includes(e.key)){e.preventDefault();card.onclick();}};reviewPeople(card,id);}
+ function decorate(){for(const card of document.querySelectorAll('#areas .job')){const id=card.dataset.job;card.querySelectorAll('.du-review-open,.du-person-review').forEach(e=>e.remove());const pick=card.querySelector('.mobile-pick');if(pick){pick.textContent=(state.jobs[id]||[]).length?'调整':'选人';pick.onclick=e=>{e.stopPropagation();if(window.DutyPersonProperties)return window.DutyPersonProperties.open(id);openPicker(id);};}card.classList.toggle('du-recent',id===recentJob);for(const chip of card.querySelectorAll('.person-card')){const n=chip.dataset.name;chip.onclick=e=>{e.stopPropagation();if(window.DutyPersonProperties)return window.DutyPersonProperties.open(id);openPicker(id,n);};chip.draggable=false;const remove=chip.querySelector('.remove-person');if(remove){const original=remove.onclick;remove.onclick=e=>{e.stopPropagation();if(canEdit())original(e);};}}card.onclick=e=>{if(e?.target?.closest('input,select,label,.temp-tools,.job-property,.person-property-open'))return;if((state.jobs[id]||[]).length){reviewOpen=reviewOpen===id?null:id;decorate();}else openPicker(id);};card.onkeydown=e=>{if(e.target===card&&['Enter',' '].includes(e.key)){e.preventDefault();card.onclick();}};reviewPeople(card,id);}
  for(const person of document.querySelectorAll('#pool .person'))person.draggable=false;for(const area of document.querySelectorAll('#areas>.area'))area.style.scrollMarginTop='140px';updateDock();syncPicked();}
  const baseRender=render;render=function(){baseRender();if(targetId&&targetDate!==state.date&&picker.open)picker.close();decorate();};
  const oldDate=by('date').onchange;by('date').onchange=function(e){const old=state.date;const r=oldDate.call(this,e);if(state.date!==old){reviewOpen=null;recentJob=null;if(picker.open)picker.close();decorate();}return r;};
@@ -974,11 +974,11 @@ function dutyPersonRework(job,name,rework=state.reworkNames){
  function apply(id,results,date=state.date,snapshot=JSON.stringify(assigned(id))){
   const problem=blocked();if(problem)return tell(problem);
   const j=JOBS.find(j=>j.id===id),names=assigned(id);
-  if(date!==state.date||snapshot!==JSON.stringify(names)||!j)return tell('日期或岗位人员已变化，请重新打开个人属性');
+  if(date!==state.date||snapshot!==JSON.stringify(names)||!j)return tell('日期或岗位人员已变化，请重新打开调整窗口');
   if(Object.keys(results).length!==names.length||names.some(n=>!['normal','rework'].includes(results[n])))return tell('请为每位学生选择普通值日或返工');
   const changed=names.filter(n=>(dutyPersonRework(j,n)?'rework':'normal')!==results[n]);
   if(!changed.length)return true;
-  if(changed.some(n=>accepted(j,n)||state.inspections?.[id]?.people?.[n]==='redo'||state.inspections?.[id]?.rework?.includes(n)))return tell('该学生已有验收或重做记录，请先更正为待验收并保存，再修改个人属性');
+  if(changed.some(n=>accepted(j,n)||state.inspections?.[id]?.people?.[n]==='redo'||state.inspections?.[id]?.rework?.includes(n)))return tell('该学生已有验收或重做记录，请先更正为待验收并保存，再修改劳动性质');
   record();
   const rework=names.filter(n=>results[n]==='rework');
   if(!j.temporary){
@@ -989,21 +989,43 @@ function dutyPersonRework(job,name,rework=state.reworkNames){
    def.completionKind='normal';if(j.temporary)def.reworkPeople=[...rework];
    if(def.cloudNotes)for(const n of names){const note=String(def.cloudNotes[n]||'').replace(/返工|处罚/g,'').replace(/^[\s·、，；;]+|[\s·、，；;]+$/g,'');def.cloudNotes[n]=(results[n]==='rework'?'返工':'')+(results[n]==='rework'&&note?' · ':'')+note;}
   }
-  state.published=false;selected.clear();render();tell('个人属性已保存；重新发布后展示端生效，验收合格后按个人性质计次');return true;
+  state.published=false;selected.clear();render();tell('人员设置已保存；重新发布后展示端生效，验收合格后按个人性质计次');return true;
  }
- const dialog=document.createElement('dialog');dialog.className='individual-dialog';dialog.setAttribute('aria-label','个人属性');
- const title=document.createElement('h3'),help=document.createElement('p'),list=document.createElement('div'),save=document.createElement('button'),cancel=document.createElement('button');
- help.textContent='只修改需要返工的学生。同岗其他人不受影响，验收合格后分别计次。';save.type=cancel.type='button';save.textContent='保存个人属性';save.className='primary';cancel.textContent='取消';cancel.onclick=()=>dialog.close();dialog.append(title,help,list,save,cancel);document.body.append(dialog);
+ const dialog=document.createElement('dialog');dialog.className='individual-dialog assignment-dialog';dialog.setAttribute('aria-label','调整人员');
+ const title=document.createElement('h3'),help=document.createElement('p'),list=document.createElement('div'),addRow=document.createElement('div'),batch=document.createElement('div'),save=document.createElement('button'),cancel=document.createElement('button');
+ help.textContent='在这里调整人员和劳动性质。更换、移除或添加时一并保存当前设置。';save.type=cancel.type='button';save.textContent='保存';save.className='primary';cancel.textContent='关闭';cancel.onclick=()=>dialog.close();dialog.append(title,help,batch,list,addRow,save,cancel);document.body.append(dialog);
  function open(id){
   const problem=blocked();if(problem)return tell(problem);
-  const j=JOBS.find(j=>j.id===id);if(!j||!assigned(id).length)return;
-  const date=state.date,snapshot=JSON.stringify(assigned(id));title.textContent=j.label+' · 个人属性';list.replaceChildren();
+  const j=JOBS.find(j=>j.id===id);if(!j)return;
+  const date=state.date,snapshot=JSON.stringify(assigned(id));title.textContent=j.label+' · 调整人员';list.replaceChildren();batch.replaceChildren();addRow.replaceChildren();
+  const store=()=>apply(id,Object.fromEntries([...list.querySelectorAll('select[data-kind]')].map(s=>[s.dataset.name,s.value])),date,snapshot);
+  const choosePerson=(outgoing=null)=>{
+   const line=document.createElement('div');line.className='assignment-choose';const select=document.createElement('select');select.setAttribute('aria-label',outgoing?'更换'+outgoing:'选择添加人员');
+   const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='选择学生';select.append(placeholder);
+   for(const n of NAMES.filter(n=>available(n)&&!assigned(id).includes(n)&&canEnter(n,id))){const option=document.createElement('option');option.value=n;option.textContent=n+(jobFor(n)?'（已安排）':'');select.append(option);}
+   const confirm=document.createElement('button');confirm.type='button';confirm.textContent=outgoing?'确认更换':'添加到岗位';confirm.onclick=()=>{
+    const n=select.value;if(!n)return tell('请先选择学生');if(!store())return;
+    const before=JSON.stringify(state.jobs);
+    if(j.temporary){try{if(outgoing){if(tempComplete(id,outgoing))return tell('该学生已验收，请先更正验收');const other=jobsForName(n).some(x=>x.id!==id);if(other&&!window.confirm('该学生已有岗位，转到这里并撤下原岗位？'))return;record();state.jobs[id]=state.jobs[id].filter(x=>x!==outgoing);const result=placeTempPeople([n],[id],'transfer');if(!result.assigned.length){state.jobs[id].push(outgoing);render();return tell('无法安排该学生');}}else{const other=jobsForName(n).some(x=>x.id!==id);if(other&&!window.confirm('该学生已有岗位，转到这里并撤下原岗位？'))return;placeTempPeople([n],[id],'transfer');}render();}catch(e){return tell(e.message);}}
+    else if(outgoing)swapInto(n,outgoing);else assign(id,[n]);
+    if(JSON.stringify(state.jobs)!==before){const current=JOBS.find(x=>x.id===id);const results=Object.fromEntries(assigned(id).map(name=>[name,name===n?'normal':dutyPersonRework(current,name)?'rework':'normal']));apply(id,results);open(id);}
+   };line.append(select,confirm);return line;
+  };
+  const bulkLabel=document.createElement('span');bulkLabel.textContent='批量设置';batch.className='assignment-bulk';batch.append(bulkLabel);
+  for(const [value,text] of [['normal','全员普通'],['rework','全员返工']]){const button=document.createElement('button');button.type='button';button.textContent=text;button.onclick=()=>{for(const s of list.querySelectorAll('select[data-kind]'))if(!s.disabled)s.value=value;};batch.append(button);}
+  batch.hidden=!assigned(id).length;
   for(const n of assigned(id)){
-   const label=document.createElement('label'),select=document.createElement('select');label.append(document.createTextNode(n+' '));select.dataset.name=n;select.setAttribute('aria-label',n+'劳动性质');
+   const row=document.createElement('div'),label=document.createElement('label'),select=document.createElement('select'),actions=document.createElement('div');row.className='assignment-person';actions.className='assignment-actions';label.append(document.createTextNode(n+' '));select.dataset.name=n;select.dataset.kind='true';select.setAttribute('aria-label',n+'劳动性质');
    for(const [value,text] of [['normal','普通值日'],['rework','返工']]){const option=document.createElement('option');option.value=value;option.textContent=text;select.append(option);}
-   select.value=dutyPersonRework(j,n)?'rework':'normal';select.disabled=accepted(j,n)||state.inspections?.[id]?.people?.[n]==='redo'||state.inspections?.[id]?.rework?.includes(n);label.append(select);list.append(label);
+   const fixed=accepted(j,n)||state.inspections?.[id]?.people?.[n]==='redo'||state.inspections?.[id]?.rework?.includes(n);
+   select.value=dutyPersonRework(j,n)?'rework':'normal';select.disabled=!!fixed;label.append(select);row.append(label);
+   const replace=document.createElement('button'),remove=document.createElement('button');replace.type=remove.type='button';replace.textContent='更换';remove.textContent='移除';replace.disabled=remove.disabled=!!fixed;
+   replace.onclick=()=>{row.querySelector('.assignment-choose')?.remove();row.append(choosePerson(n));};
+   remove.onclick=()=>{if(!store())return;if(j.temporary)removeTemporaryPerson(id,n);else removeNames([n]);open(id);};actions.append(replace,remove);row.append(actions);list.append(row);
   }
-  save.onclick=()=>{if(apply(id,Object.fromEntries([...list.querySelectorAll('select')].map(s=>[s.dataset.name,s.value])),date,snapshot))dialog.close();};dialog.showModal();
+  if(!assigned(id).length){const empty=document.createElement('p');empty.textContent='这个岗位还没有安排人员。';list.append(empty);}
+  if(assigned(id).length<j.cap)addRow.append(choosePerson());
+  save.onclick=()=>{if(store())dialog.close();};if(!dialog.open)dialog.showModal();
  }
  const baseRender=render;
  render=function(){
@@ -1012,13 +1034,13 @@ function dutyPersonRework(job,name,rework=state.reworkNames){
   for(const list of defs())for(const d of list||[])if(d.reworkPeople)d.reworkPeople=d.reworkPeople.filter(n=>assigned(d.id).includes(n));
   baseRender();
   for(const card of document.querySelectorAll('#areas .job')){
-   const j=JOBS.find(j=>j.id===card.dataset.job);if(!j||!assigned(j.id).length)continue;
-   const button=document.createElement('button');button.type='button';button.className='person-property-open';button.textContent='个人属性';button.disabled=!!blocked();button.onclick=e=>{e.stopPropagation();open(j.id);};card.querySelector('.job-title').append(button);
-   const count=assigned(j.id).filter(n=>dutyPersonRework(j,n)).length;
-   const select=card.querySelector(j.temporary?'.temp-tools select':'.job-kind-controls select');if(select&&count&&count<assigned(j.id).length){const option=document.createElement('option');option.value='mixed';option.textContent='普通／返工混合';option.disabled=true;select.append(option);select.value='mixed';}
+   const j=JOBS.find(j=>j.id===card.dataset.job);if(!j)continue;
+   let button=card.querySelector('.mobile-pick');if(!button){button=document.createElement('button');button.type='button';button.className='assignment-open';card.querySelector('.job-title').append(button);}button.textContent='调整';button.disabled=!!blocked();button.onclick=e=>{e.stopPropagation();open(j.id);};
+   for(const chip of card.querySelectorAll('.person-card')){chip.onclick=e=>{e.stopPropagation();open(j.id);};}
+
   }
  };
- const style=document.createElement('style');style.textContent='.person-property-open{min-height:44px;flex-shrink:0;font-size:13px}.job-title{flex-wrap:wrap}.person-kind-status{display:block;color:#9b4a16;font-size:12px;font-weight:700}';document.head.append(style);
+ const style=document.createElement('style');style.textContent='.job-kind-controls,#areas .temp-tools>select{display:none!important}.assignment-open{min-height:40px;font-size:13px;flex-shrink:0}.person-kind-status{display:block;color:#9b4a16;font-size:12px;font-weight:700}.assignment-dialog{max-width:560px}.assignment-person{padding:12px 0;border-bottom:1px solid #dce4dc}.assignment-dialog .assignment-person label{margin:0;gap:10px}.assignment-actions{display:flex;gap:6px;justify-content:flex-end}.assignment-dialog .assignment-actions button{margin:6px 0 0;padding:5px 12px;min-height:36px}.assignment-choose{display:flex;gap:8px;align-items:center;margin-top:10px}.assignment-choose select{flex:1;min-width:0;max-width:100%}.assignment-dialog .assignment-choose button{margin:0;white-space:nowrap}.assignment-bulk{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.assignment-dialog .assignment-bulk button{margin:0;padding:6px 10px;font-size:13px}.assignment-bulk span{font-size:13px;color:#667b6d}.assignment-bulk[hidden]{display:none}';document.head.append(style);
  window.DutyPersonProperties={open,apply};render();
 })();
 
