@@ -42,7 +42,7 @@ button.close-icon{display:inline-flex;align-items:center;justify-content:center;
 <main>
 <section class="panel left" id="personnelPanel"><div class="panel-head"><h2><span class="step">01 / 人员</span>分配栏</h2><span class="badge" id="availableCount"></span></div>
 <div class="import"><div class="row"><b id="pasteTitle" style="font-size:13px">粘贴今日去向</b><button id="hidePaste">收起</button></div><textarea id="paste" placeholder="粘贴完整今日去向，或“人员：姓名、姓名
-事项：临时清洁”，也可只粘贴姓名。"></textarea><div id="reworkOptions" hidden><div class="muted">一次粘贴多名人员，自动分配教室、走廊和卫生区岗位；不分配宿舍。原岗位普通人员返回待选库。</div></div><div class="row"><button class="primary" id="import">确认今日去向</button></div><div class="muted" id="importInfo" style="margin-top:8px">尚未导入名单，请点击上方“学生JS”。</div></div>
+事项：临时清洁”，也可只粘贴姓名。"></textarea><div id="reworkOptions" hidden><div class="muted">一次粘贴多名人员，自动分配教室、走廊和卫生区岗位；不分配宿舍。原岗位普通人员返回待选库。</div></div><div class="row"><button id="getPresenceCloud" type="button">☁️ 获取云端去向</button><button class="primary" id="import">确认今日去向</button></div><div class="muted" id="importInfo" style="margin-top:8px">尚未导入名单，请点击上方“学生JS”。</div></div>
 <div class="toolbar"><input id="search" placeholder="搜索姓名"><select id="sort"><option value="roster">名册顺序</option><option value="count">完成次数少 → 多</option><option value="name">姓名排序</option></select><select id="filter"><option value="ready">待安排人员</option><option value="point">刚粘贴的人员</option><option value="absent">请假人员</option><option value="all">全部人员</option></select></div>
 <div class="toolbar"><select id="genderFilter" aria-label="性别筛选"><option value="">全部性别</option><option value="男">男生</option><option value="女">女生</option><option value="未知">未标性别</option></select><select id="dormFilter" aria-label="宿舍筛选"><option value="">全部宿舍</option></select><button id="boxMode">多选模式</button><button id="all">全选当前可用人员</button><button id="clear">取消选择</button></div>
 <div class="selectionbar"><span id="selectionInfo">已选0人</span><span style="font-size:12px;color:#6f8269">正常／返工分别计次</span></div>
@@ -116,7 +116,7 @@ function randomDormAssignments(dateText,excluded=[]){
 
 function fixedDormDay(date=state.date){const days=state.fixedDorm?.days;if(!days)return null;const week=state.fixedTemplate||['周日','周一','周二','周三','周四','周五','周六'][new Date(date+'T12:00:00').getDay()];return days[state.fixedTemplate?week:date]||days[week]||null;}
 function fixedRoomNames(room){return fixedDormDay()?.[room]||null;}
-function dormRoles(room){const count=state.importedJobs?.find(j=>j.room===room)?.cap||fixedRoomNames(room)?.length||(state.deep?3:2);const imported=state.importedJobs?.find(j=>j.room===room);const roles=imported?.cloudRoles?.length?[...imported.cloudRoles]:[...DORM_TASKS[state.deep?'deep':'daily']];while(roles.length<count)roles.push('协助清洁与收尾');return roles.slice(0,count);}
+function dormRoles(room){const count=state.jobCaps?.['dorm:'+room]||state.importedJobs?.find(j=>j.room===room)?.cap||fixedRoomNames(room)?.length||(state.deep?3:2);const imported=state.importedJobs?.find(j=>j.room===room);const roles=imported?.cloudRoles?.length?[...imported.cloudRoles]:[...DORM_TASKS[state.deep?'deep':'daily']];while(roles.length<count)roles.push('协助清洁与收尾');return roles.slice(0,count);}
 function isSupplement(n,room){const fixed=fixedRoomNames(room);return !!fixed&&!fixed.includes(n);}
 function generateDormAssignments(dateText,excluded=[]){if(!state.fixedDorm)return randomDormAssignments(dateText,excluded);const fixed=fixedDormDay(dateText);if(!fixed)throw Error('固定宿舍表没有这一天，请在“宿舍按…表”中选择调休对应星期');const blocked=new Set(excluded),planned=new Set(Object.values(fixed).flat());const rooms=dormRooms(),result=[];for(const room of rooms){const roomName=String(room.room),base=fixed[roomName];if(!base)continue;const eligible=(room.members||[]).map(dormMemberName).filter(n=>studentByName(n)&&statusFor(n)==='在班'&&stabilityFor(n)!=='long_absent'&&!reworkResting(n,dateText));const names=[],replacements=[];for(const name of base){let chosen=eligible.includes(name)&&!blocked.has(name)?name:null;if(!chosen)chosen=eligible.filter(n=>!blocked.has(n)&&!planned.has(n)).sort((a,b)=>compareScore(dormScoreFor(a,roomName,dateText),dormScoreFor(b,roomName,dateText)))[0];if(chosen){if(chosen!==name)replacements.push({oldName:name,newName:chosen,room:roomName,reason:dormUnavailableReason(name)});names.push(chosen);blocked.add(chosen);}}result.push({room:roomName,names,roles:dormRoles(roomName),replacements});}for(const room of rooms.filter(r=>!fixed[r.room])){const random=randomDormAssignments(dateText,[...blocked]).find(r=>r.room===room.room);if(random){random.names.forEach(n=>blocked.add(n));result.push(random);}}return result;}
 
@@ -135,9 +135,10 @@ function scoreFor(name,task,dateText){
   return [lastOrdinaryDutyDate(name),load,repeated,tie];
 }
 function compareScore(a,b){for(let i=0;i<a.length;i+=1){if(a[i]<b[i])return-1;if(a[i]>b[i])return 1;}return 0;}
+function jobAutoBlocked(id){return !!state.blockedJobs?.[id];}
 function generateAssignment(dateText,templateDay=templateDayFor(dateText),reserved=[]){
   const available=new Set(eligibleFor(dateText).map(student=>student.name).filter(name=>!reserved.includes(name)));
-  return taskListFor(dateText).map(task=>{const names=[...available].filter(name=>!task.maleOnly||genderFor(name)==="男").sort((a,b)=>compareScore(scoreFor(a,task,dateText),scoreFor(b,task,dateText))).slice(0,task.count);names.forEach(name=>available.delete(name));return {...task,names};});
+  return taskListFor(dateText).filter(task=>!jobAutoBlocked(task.id)).sort((a,b)=>Number(!!b.maleOnly)-Number(!!a.maleOnly)).map(task=>{const names=[...available].filter(name=>!task.maleOnly||genderFor(name)==="男").sort((a,b)=>compareScore(scoreFor(a,task,dateText),scoreFor(b,task,dateText))).slice(0,task.count);names.forEach(name=>available.delete(name));return {...task,names};});
 }
 
 function studentByName(n){return state.students.find(s=>s.name===n);}
@@ -148,17 +149,21 @@ function statusRecord(n){return {status:statusFor(n)};}
 function dormMemberName(v){return normalizeName(typeof v==='string'?v:v?.name||'');}
 function dormRooms(){return state.dorm?.rooms||[];}
 function deepCleanFor(){return state.deep;}
-function taskListFor(){return TASKS.filter(t=>t.mode!=='temporary'&&(t.mode!=='deep'||state.deep)&&(t.id!=='zone2'||state.zone2)).map(t=>({...t,count:Math.max(0,t.count-heldRework(t.id).length)}));}
+function configuredTasks(){
+ const plans=state.areaPlans||{};
+ return ['classroom','zone1','zone2'].flatMap(area=>plans[area]?.tasks||TASKS.filter(t=>t.area===area));
+}
+function taskListFor(){return configuredTasks().filter(t=>t.mode!=='temporary'&&(t.mode!=='deep'||state.deep)&&(t.area!=='zone2'||state.zone2)).map(t=>({...t,count:Math.max(0,(state.jobCaps?.[t.id]||t.count)-heldRework(t.id).length)}));}
 function statTemplate(){return {normal:0,substitute:0,lastDate:'',lastTask:''};}
 function dormStatTemplate(){return {count:0,lastDate:''};}
 function refreshBaseJobs(){if(state.importedJobs?.length){JOBS=state.importedJobs.map(j=>({...j}));for(const j of JOBS)if(!state.jobs[j.id])state.jobs[j.id]=[];return;}JOBS=[...taskListFor(state.date).map(t=>({...t,cap:t.count+heldRework(t.id).length,area:t.area==='classroom'?'教室与走廊':t.area==='zone1'?'1号卫生区':'2号卫生区',label:t.label})),...dormRooms().map(r=>({id:'dorm:'+r.room,area:'宿舍值日',label:r.room,room:r.room,cap:fixedRoomNames(r.room)?.length||(state.deep?3:2)}))];for(const def of state.carriedDefs||[]){const existing=JOBS.find(j=>j.id===def.id);if(!existing)JOBS.push({...def});else existing.cap=Math.max(existing.cap,(state.jobs[def.id]||[]).length);}for(const j of JOBS)if(!state.jobs[j.id])state.jobs[j.id]=[];for(const id of Object.keys(state.jobs))if(!JOBS.some(j=>j.id===id)&&!(state.tempJobs||[]).some(j=>j.id===id))delete state.jobs[id];}
-function refreshJobs(){refreshBaseJobs();for(const def of state.tempJobs||[]){const index=JOBS.findIndex(j=>j.id===def.id);if(index<0)JOBS.push({...def});else JOBS[index]={...def};if(!state.jobs[def.id])state.jobs[def.id]=[];}}
+function refreshJobs(){refreshBaseJobs();for(const def of state.tempJobs||[]){const index=JOBS.findIndex(j=>j.id===def.id);if(index<0)JOBS.push({...def});else JOBS[index]={...def};if(!state.jobs[def.id])state.jobs[def.id]=[];}for(const j of JOBS)j.cap=Math.max(state.jobCaps?.[j.id]??j.cap,(state.jobs[j.id]||[]).length);}
 function personPresent(n){return NAMES.includes(n)&&!state.absent.includes(n)&&!state.paused.includes(n);}
 function jobsForName(n){return JOBS.filter(j=>(state.jobs[j.id]||[]).includes(n));}
 function tempComplete(id,n){return (state.tempDone?.[id]||[]).includes(n);}
 function completedNames(){return [...new Set([...state.done,...Object.values(state.tempDone||{}).flat()])];}
 function canEnter(n,id){const j=JOBS.find(j=>j.id===id);if(j.maleOnly&&genderFor(n)!=='男')return false;if(j.room&&!dormRooms().find(r=>r.room===j.room)?.members.some(m=>dormMemberName(m)===n))return false;return available(n);}
-function automatic(){if(state.students.some(s=>s.cloudOnly))return tell('当前仅有公告人员，请先导入完整学生JS再自动分配');if(Object.keys(inspectionDraft).length)return tell('验收修改尚未保存，请先确认保存或取消修改');if(!NAMES.length)return tell('先导入学生JS');if(JOBS.some(j=>state.jobs[j.id]?.length)&&JOBS.filter(j=>state.jobs[j.id]?.length).every(j=>inspectionStatus(j.id)==='pass'))return tell('全部岗位已合格，无需重新分配');if(state.presenceDate!==state.date&&!confirm('尚未导入这个日期的完整去向。仅按当前名单生成，是否继续？'))return;if(Object.values(state.jobs).some(ns=>ns.length)&&!confirm('保留已合格和重做人员，重新分配其余岗位，是否继续？'))return;let dorm;try{dorm=generateDormAssignments(state.date,heldReworkNames());for(const r of dorm){const held=heldRework('dorm:'+r.room);r.names=[...held,...r.names.filter(n=>!held.includes(n))].slice(0,Math.max(dormRoles(r.room).length,held.length));}}catch(err){return tell(err.message);}record();const pinnedDefs=JOBS.filter(j=>heldRework(j.id).length).map(j=>({...j}));state.carriedDefs=[...(state.carriedDefs||[]),...pinnedDefs.filter(j=>!(state.carriedDefs||[]).some(d=>d.id===j.id))];state.importedJobs=null;state.dormReplacements=dorm.flatMap(r=>r.replacements||[]);const held=Object.fromEntries(JOBS.map(t=>[t.id,heldRework(t.id)]));const reserved=[...dorm.flatMap(r=>r.names),...heldReworkNames()],normal=generateAssignment(state.date,0,reserved);state.jobs={};refreshJobs();for(const r of dorm)state.jobs['dorm:'+r.room]=r.names;for(const t of normal)state.jobs[t.id]=[...(held[t.id]||[]),...t.names];for(const def of state.carriedDefs||[])if(!state.jobs[def.id]?.length)state.jobs[def.id]=held[def.id]||[];state.published=false;selected.clear();render();const missing=JOBS.filter(j=>state.jobs[j.id].length<j.cap);const resting=NAMES.filter(n=>reworkResting(n)&&!jobFor(n)).length;tell((missing.length?'已分配，仍有'+missing.length+'个岗位缺人':'已补齐其余岗位')+'；已合格和重做人员保留'+(resting?'，'+resting+'人返工后休息':''));}
+function automatic(){if(state.students.some(s=>s.cloudOnly))return tell('当前仅有公告人员，请先导入完整学生JS再自动分配');if(Object.keys(inspectionDraft).length)return tell('验收修改尚未保存，请先确认保存或取消修改');if(!NAMES.length)return tell('先导入学生JS');if(JOBS.some(j=>state.jobs[j.id]?.length)&&JOBS.filter(j=>state.jobs[j.id]?.length).every(j=>inspectionStatus(j.id)==='pass'))return tell('全部岗位已合格，无需重新分配');if(state.presenceDate!==state.date&&!confirm('尚未导入这个日期的完整去向。仅按当前名单生成，是否继续？'))return;if(Object.values(state.jobs).some(ns=>ns.length)&&!confirm('保留已合格和重做人员，重新分配其余岗位，是否继续？'))return;const masked=Object.fromEntries(JOBS.filter(j=>jobAutoBlocked(j.id)).map(j=>[j.id,[...(state.jobs[j.id]||[])]]));let dorm;try{dorm=generateDormAssignments(state.date,[...heldReworkNames(),...Object.values(masked).flat()]).filter(r=>!jobAutoBlocked('dorm:'+r.room));for(const r of dorm){const held=heldRework('dorm:'+r.room);r.names=[...held,...r.names.filter(n=>!held.includes(n))].slice(0,Math.max(state.jobCaps?.['dorm:'+r.room]??dormRoles(r.room).length,held.length));}}catch(err){return tell(err.message);}record();const pinnedDefs=JOBS.filter(j=>heldRework(j.id).length||jobAutoBlocked(j.id)).map(j=>({...j}));state.carriedDefs=[...(state.carriedDefs||[]),...pinnedDefs.filter(j=>!(state.carriedDefs||[]).some(d=>d.id===j.id))];state.importedJobs=null;state.dormReplacements=dorm.flatMap(r=>r.replacements||[]);const held=Object.fromEntries(JOBS.map(t=>[t.id,heldRework(t.id)]));const reserved=[...dorm.flatMap(r=>r.names),...heldReworkNames(),...Object.values(masked).flat()],normal=generateAssignment(state.date,0,reserved);state.jobs={};refreshJobs();for(const r of dorm)state.jobs['dorm:'+r.room]=r.names;for(const t of normal)state.jobs[t.id]=[...(held[t.id]||[]),...t.names];for(const def of state.carriedDefs||[])if(!state.jobs[def.id]?.length)state.jobs[def.id]=held[def.id]||[];Object.assign(state.jobs,masked);state.published=false;selected.clear();render();const missing=JOBS.filter(j=>!jobAutoBlocked(j.id)&&state.jobs[j.id].length<j.cap);const resting=NAMES.filter(n=>reworkResting(n)&&!jobFor(n)).length;tell((missing.length?'已分配，仍有'+missing.length+'个岗位缺人':'已补齐其余岗位')+'；已合格和重做人员保留'+(resting?'，'+resting+'人返工后休息':''));}
 function fitFrame(){const frame=$('frame');frame.style.transform='none';frame.style.left='';frame.style.top='';frame.style.width='';frame.style.height='';}
 window.addEventListener('resize',fitFrame);
 state.students=state.students||DEFAULT_STUDENTS;state.dorm=state.dorm||DEFAULT_DORM;state.stats=state.stats||{};state.dormStats=state.dormStats||{};state.deep=!!state.deep;state.zone2=state.zone2!==false;state.presenceDate=state.presenceDate||'';NAMES=state.students.map(s=>s.name);refreshJobs();fitFrame();
@@ -205,14 +210,14 @@ function makePerson(n,chip=false,contextId=null){const context=JOBS.find(j=>j.id
 e.onclick=ev=>{ev.stopPropagation();if(context?.temporary&&selected.size){assignTemporary(contextId,[...selected]);return;}if(chip&&!multiMode&&selected.size===1&&!selected.has(n)){swapInto([...selected][0],n);return;}toggle(n);};if(chip){e.ondragover=ev=>{ev.preventDefault();ev.stopPropagation();};e.ondrop=ev=>{ev.preventDefault();ev.stopPropagation();if(context?.temporary){assignTemporary(contextId,dragNames);return;}if(dragNames.length!==1)return tell('交换姓名时请只选1人');swapInto(dragNames[0],n);};}e.ondragstart=ev=>{if(!selected.has(n)){selected.clear();selected.add(n);updateSelection();}dragNames=[...selected].filter(personPresent);ev.dataTransfer.setData('application/x-duty-names',JSON.stringify(dragNames));ev.dataTransfer.effectAllowed='move';};e.ondragend=()=>{dragNames=[];document.querySelectorAll('.over').forEach(e=>e.classList.remove('over'));};return e;}
 function render(){ refreshDormFilters();refreshFixedDormFilters();renderPauseStatus();refreshJobs();syncInspectionDraft();$('auto').disabled=!NAMES.length;$('dailyState').textContent=completedNames().length?'已验收 '+completedNames().length+'人':state.published?'已发布，可继续调整':'草稿';$('fixedTemplate').value=state.fixedTemplate||'';$('fixedTemplate').hidden=!state.fixedDorm;$('deep').checked=state.deep;$('zone2').checked=state.zone2;$('date').value=state.date;$('importInfo').textContent=state.info;$('availableCount').textContent=`可用 ${NAMES.filter(placeable).length} 人`;$('assignedCount').textContent=`已放置 ${Object.values(state.jobs).flat().length} / ${JOBS.reduce((sum,j)=>sum+j.cap,0)} 人`;$('publishState').textContent=state.published?'已确认':'草稿';$('pool').replaceChildren(...visibleNames().map(n=>makePerson(n)));if(!visibleNames().length){const empty=document.createElement('div');empty.className='pool-empty';empty.textContent=NAMES.length?'当前没有符合条件的人员':'先导入找人App学生JS；本软件没有内置名单';$('pool').append(empty);} $('areas').replaceChildren();for(const area of [...new Set(JOBS.map(j=>j.area))]){const section=document.createElement('div');section.className='area';section.dataset.area=area;section.style.scrollMarginTop='90px';const heading=document.createElement('h3');const areaTitle=document.createElement('span');areaTitle.className='area-module-title';areaTitle.textContent=({'教室与走廊':'🏫 ','1号卫生区':'🌿 ','2号卫生区':'🧹 ','宿舍值日':'🛏️ ','临时劳动':'🧰 '}[area]||'📍 ')+area;heading.append(areaTitle);const actions=document.createElement('span');actions.className='area-checks';for(const [label,status] of [['✅ 区域合格','pass'],['🛠️ 区域重做','redo']]){const b=document.createElement('button');b.textContent=label;b.onclick=()=>inspectJobs(JOBS.filter(j=>j.area===area).map(j=>j.id),status);actions.append(b);}if(area==='临时劳动'){const batch=document.createElement('button');batch.textContent='📋 批量安排人员';batch.onclick=()=>openBatchDialog();actions.prepend(batch);}heading.append(actions);section.append(heading);if(area==='临时劳动'){const summary=document.createElement('div');summary.className='temp-summary';const total=JOBS.filter(j=>j.temporary).reduce((v,j)=>v+(state.jobs[j.id]||[]).length,0);summary.textContent='已安排 '+total+' 人次 · 待安排 '+(state.tempPending||[]).length+' 人';if(state.tempPending?.length)summary.textContent+='：'+state.tempPending.join('、');section.append(summary);}const grid=document.createElement('div');grid.className='jobs';for(const j of JOBS.filter(j=>j.area===area)){const card=document.createElement('div');card.className='job';card.classList.toggle('temporary-job',!!j.temporary);card.dataset.job=j.id;card.classList.toggle('wide-job',j.cap>1);card.tabIndex=0;card.setAttribute('role','button');card.setAttribute('aria-label',j.label+'，点击放置选中人员');const title=document.createElement('div');title.className='job-title';title.append(document.createTextNode(j.label));const count=document.createElement('span');count.textContent=`${state.jobs[j.id].length}/${j.cap}`;title.append(count);card.append(title);if(j.temporary){const tools=document.createElement('div');tools.className='temp-tools';const tag=document.createElement('select');tag.setAttribute('aria-label',j.label+'性质');for(const [value,label] of [['rework','🛠️ 处罚／返工'],['normal','🔁 普通值日／替补']]){const option=document.createElement('option');option.value=value;option.textContent=label;tag.append(option);}tag.value=j.completionKind;tag.disabled=!!state.tempDone?.[j.id]?.length;tag.onchange=()=>editTempDefinition(j.id,'completionKind',tag.value);const capLabel=document.createElement('label');capLabel.textContent='人数 ';const capacity=document.createElement('input');capacity.type='number';capacity.min=Math.max(1,state.jobs[j.id].length);capacity.max=20;capacity.value=j.cap;capacity.setAttribute('aria-label',j.label+'人数');capacity.disabled=!!state.tempDone?.[j.id]?.length;capacity.onchange=()=>editTempDefinition(j.id,'cap',capacity.value);capLabel.append(capacity);const add=document.createElement('button');add.textContent='📋 粘贴名单';add.onclick=e=>{e.stopPropagation();openBatchDialog([j.id]);};const del=document.createElement('button');del.textContent='移除区域';del.onclick=e=>{e.stopPropagation();deleteTemporary(j.id);};tools.append(tag,capLabel,add,del);card.append(tools);}const slots=document.createElement('div');slots.className='slots';for(const n of state.jobs[j.id])slots.append(makePerson(n,true,j.id));for(let i=state.jobs[j.id].length;i<j.cap;i++){const slot=document.createElement('span');slot.className='slot';slot.textContent='＋ 放入';slots.append(slot);}card.append(slots);const inspection=draftInspectionStatus(j.id);card.classList.toggle('needs-redo',inspection==='redo');card.classList.toggle('passed',inspection==='pass');const controls=document.createElement('div');controls.className='job-check';controls.onclick=e=>e.stopPropagation();controls.onkeydown=e=>e.stopPropagation();for(const [value,text] of [['pending','待验收'],['pass','合格'],['redo','不合格重做']]){const label=document.createElement('label'),radio=document.createElement('input');radio.type='radio';radio.name='inspection-'+j.id;radio.value=value;radio.checked=inspection===value;radio.disabled=!state.jobs[j.id].length;radio.setAttribute('aria-label',j.label+'：'+text);radio.onchange=()=>inspectJobs([j.id],value);label.append(radio,document.createTextNode(text));controls.append(label);}if(inspectionDraft[j.id]){const note=document.createElement('span');note.className='unsaved';note.textContent='未保存';controls.append(note);}card.append(controls);card.onclick=()=>assign(j.id,[...selected]);card.onkeydown=e=>{if(e.target===card&&(e.key==='Enter'||e.key===' ')){e.preventDefault();assign(j.id,[...selected]);}};card.ondragover=e=>{e.preventDefault();card.classList.add('over');};card.ondragleave=()=>card.classList.remove('over');card.ondrop=e=>{e.preventDefault();card.classList.remove('over');assign(j.id,dragNames);};grid.append(card);}section.append(grid);$('areas').append(section);}
 $('preview').replaceChildren();const h=document.createElement('h3');h.textContent=state.className+' · 值日安排';const d=document.createElement('div');d.className='preview-date';d.textContent=state.date+' · '+(state.published?'已确认':'预览草稿');$('preview').append(h,d);let populated=0;for(const j of JOBS){if(!state.jobs[j.id].length)continue;populated++;const item=document.createElement('div');item.className='preview-item';const label=document.createElement('label');label.textContent=j.label;const names=document.createElement('b');names.textContent=state.jobs[j.id].join('、');item.append(label,names);$('preview').append(item);}if(!populated){const p=document.createElement('div');p.className='preview-empty';p.textContent='点击自动分配，再调整个别岗位。这里同步显示最终安排。';$('preview').append(p);}
-const missing=JOBS.filter(j=>state.jobs[j.id].length<j.cap);$('check').textContent=state.done.length?`当天已验收 ${state.done.length} 人。合格岗位已归档到当天已完成记录，原公告保留。`:missing.length?`还有 ${missing.length} 个岗位未满。可先试放置；发布前会提示缺口。`:'所有岗位已放满；可云端发布或导出公告JS。';$('doneTitle').textContent=`完成池 · ${completedNames().length}人`;$('doneNames').replaceChildren(...completedNames().map(n=>{const e=document.createElement('span');e.textContent=n+' · 正常 '+(state.counts[n]||0)+' 次 · 返工 '+(state.stats[n]?.rectification||0)+' 次';return e;}));const dirty=Object.keys(inspectionDraft).length;$('saveInspection').disabled=!dirty;$('cancelInspection').disabled=!dirty;if(dirty)$('dailyState').textContent=dirty+'个岗位验收未保存';$('undo').disabled=!history.length;updateSelection();refreshMobileUI();save();}
+const missing=JOBS.filter(j=>!jobAutoBlocked(j.id)&&state.jobs[j.id].length<j.cap);$('check').textContent=state.done.length?`当天已验收 ${state.done.length} 人。合格岗位已归档到当天已完成记录，原公告保留。`:missing.length?`还有 ${missing.length} 个岗位未满。可先试放置；发布前会提示缺口。`:'所有岗位已放满；可云端发布或导出公告JS。';$('doneTitle').textContent=`完成池 · ${completedNames().length}人`;$('doneNames').replaceChildren(...completedNames().map(n=>{const e=document.createElement('span');e.textContent=n+' · 正常 '+(state.counts[n]||0)+' 次 · 返工 '+(state.stats[n]?.rectification||0)+' 次';return e;}));const dirty=Object.keys(inspectionDraft).length;$('saveInspection').disabled=!dirty;$('cancelInspection').disabled=!dirty;if(dirty)$('dailyState').textContent=dirty+'个岗位验收未保存';$('undo').disabled=!history.length;updateSelection();refreshMobileUI();save();}
 function assign(id,names){if(!JOBS.find(j=>j.id===id)?.temporary&&names.some(n=>jobsForName(n).some(j=>j.temporary&&tempComplete(j.id,n))))return tell('临时任务已验收，请先将其改为待验收并保存，或在临时区域选择兼做');if(JOBS.find(j=>j.id===id)?.temporary){assignTemporary(id,names);return;}if(names.some(n=>state.done.includes(n))||(state.jobs[id]||[]).some(n=>state.done.includes(n))){tell('该人员或岗位已有完成记录，请通过“更正验收”修改；其他待办可正常调整');return;}names=[...new Set(names)].filter(available);if(!names.length){tell('先点选姓名，再点岗位；也可以直接拖入');return;}const job=JOBS.find(j=>j.id===id),target=state.jobs[id],incoming=names.filter(n=>!target.includes(n));if(!incoming.length){tell('所选人员已经在这个岗位');return;}if(incoming.some(n=>!canEnter(n,id))){tell('无法放置：男厕所限男生，宿舍限本宿舍成员');return;}if(incoming.length>job.cap){tell(`选中${incoming.length}人，这个岗位只容纳${job.cap}人，请减少选择`);return;}const free=job.cap-target.length;
 if(incoming.length>free){if(incoming.length===1&&target.length===1&&jobFor(incoming[0])){const source=jobFor(incoming[0]);if(!canEnter(target[0],source.id)){tell('交换后人员不符合原岗位要求');return;}record();state.jobs[source.id]=state.jobs[source.id].map(n=>n===incoming[0]?target[0]:n);state.jobs[id]=[incoming[0]];}else{tell('岗位已满或空位不足；点名字旁×撤回，单人岗位之间可直接交换');return;}}
 else{record();for(const n of incoming){const source=jobFor(n);if(source)state.jobs[source.id]=state.jobs[source.id].filter(x=>x!==n);}state.jobs[id].push(...incoming);}selected.clear();state.published=false;render();tell(`已放置到${job.label}`);}
 function swapInto(incoming,outgoing){if([incoming,outgoing].some(n=>jobsForName(n).some(j=>j.temporary&&tempComplete(j.id,n))))return tell('临时任务已验收，请先修改验收并保存');if([incoming,outgoing].some(n=>state.done.includes(n)))return tell('已完成人员不能交换，请通过“更正验收”修改');if(incoming===outgoing)return;const target=jobFor(outgoing),source=jobFor(incoming);if(!target)return;if(!canEnter(incoming,target.id)||source&&!canEnter(outgoing,source.id))return tell('无法交换：男厕所限男生，宿舍限本宿舍成员');record();if(source&&source.id===target.id){state.jobs[target.id]=state.jobs[target.id].map(n=>n===outgoing?incoming:n===incoming?outgoing:n);}else{state.jobs[target.id]=state.jobs[target.id].map(n=>n===outgoing?incoming:n);if(source)state.jobs[source.id]=state.jobs[source.id].map(n=>n===incoming?outgoing:n);}selected.clear();state.published=false;render();tell(source?'已交换两个岗位人员':'已替换，原人员返回待安排池');}
 function removeNames(names){if(names.some(n=>jobsForName(n).some(j=>j.temporary&&tempComplete(j.id,n))))return tell('该人员临时任务已验收，请先修改验收并保存');if(names.some(n=>state.done.includes(n))){tell('已完成人员不能撤下，请通过“更正验收”修改');return;}if(!names.some(jobFor))return;record();for(const j of JOBS)state.jobs[j.id]=state.jobs[j.id].filter(n=>!names.includes(n));for(const n of names)if(state.reworkNames)delete state.reworkNames[n];selected.clear();state.published=false;render();tell('已撤回人员池');}
 function parseNames(raw){const names=raw.trim().split(/[、，,；;\s]+/).filter(Boolean).filter(n=>n!=='无').map(resolveName);if(new Set(names).size!==names.length)throw Error('名单有重复姓名，请核对');return names;}
-function importText(){if(pasteMode==='rework'){return importReworkText();}try{const text=$('paste').value.trim();if(!NAMES.length)throw Error('先导入学生JS，再粘贴人员');if(!text)throw Error('请先粘贴文字');if(state.done.length)throw Error('当天已验收；请先撤销验收或切换日期');if(!/请假人员\s*[:：]/.test(text))throw Error('这里粘贴完整今日去向；人员／事项文字请点“安排返工”');let absence=null,point=null,info='',filter='ready';if(/请假人员\s*[:：]/.test(text)){const match=text.match(/请假人员\s*[:：]([^。\n\r]*)/);absence=parseNames(match[1]);const total=text.match(/在册人数\s*(\d+)\s*人/),present=text.match(/实到人数\s*(\d+)\s*人/),abs=text.match(/请假\s*(\d+)\s*人/);if(!total||!present||!abs)throw Error('去向内容需包含在册、实到、请假人数与请假名单');if(+total[1]!==NAMES.length||+present[1]+ +abs[1]!==+total[1]||+abs[1]!==absence.length)throw Error('人数与名单不一致，请重新复制完整去向');info=`已识别去向：在册${total[1]}人，在班${present[1]}人，请假${absence.length}人。`;}
+function importText(){if(pasteMode==='rework'){return importReworkText();}try{const text=$('paste').value.trim();if(!NAMES.length)throw Error('先导入学生JS，再粘贴人员');if(!text)throw Error('请获取或粘贴今日去向');const suppliedDate=text.match(/^日期[：:]\s*(\d{4}-\d{2}-\d{2})/m)?.[1];if(suppliedDate&&suppliedDate!==state.date)throw Error('去向日期与当前排班日期不一致');if(state.done.length)throw Error('当天已验收；请先撤销验收或切换日期');if(!/请假人员\s*[:：]/.test(text))throw Error('这里粘贴完整今日去向；人员／事项文字请点“安排返工”');let absence=null,point=null,info='',filter='ready';if(/请假人员\s*[:：]/.test(text)){const match=text.match(/请假人员\s*[:：]([^。\n\r]*)/);absence=parseNames(match[1]);const total=text.match(/在册人数\s*(\d+)\s*人/),present=text.match(/实到人数\s*(\d+)\s*人/),abs=text.match(/请假\s*(\d+)\s*人/);if(!total||!present||!abs)throw Error('去向内容需包含在册、实到、请假人数与请假名单');if(+total[1]!==NAMES.length||+present[1]+ +abs[1]!==+total[1]||+abs[1]!==absence.length)throw Error('人数与名单不一致，请重新复制完整去向');info=`已识别去向：在册${total[1]}人，在班${present[1]}人，请假${absence.length}人。`;}
 else if(/人员\s*[:：]/.test(text)){const raw=text.split(/人员\s*[:：]/)[1].split(/事项\s*[:：]/)[0].replace(/[。\n\r]+$/g,'');point=parseNames(raw);if(!point.length)throw Error('人员名单为空');filter='point';const note=text.match(/事项\s*[:：]([\s\S]*)/);info=`已识别点人${point.length}人${note?' · '+note[1].trim():''}；已选中可安排人员。`;}
 else {point=parseNames(text.replace(/[。]+$/,''));if(!point.length)throw Error('没有姓名');filter='point';info='已识别'+point.length+'人；选中后可微调岗位。';}record();if(absence!==null){state.presenceDate=state.date;state.absent=absence;applyCarryovers();refreshJobs();let removed=0;for(const j of JOBS){removed+=state.jobs[j.id].filter(n=>absence.includes(n)).length;state.jobs[j.id]=state.jobs[j.id].filter(n=>!absence.includes(n));}for(const n of absence)if(state.reworkNames)delete state.reworkNames[n];if(removed)info+=` 已撤出${removed}名请假人员，空位待补。`;selected.clear();}if(point!==null){state.point=point;selected=new Set(point.filter(available));const blocked=point.filter(n=>!available(n));if(blocked.length)info+=' 暂不可安排：'+blocked.join('、')+'。';}state.info=info;state.published=false;$('filter').value=filter;$('search').value='';render();document.body.classList.remove('paste-open');tell('识别完成');}catch(e){tell(e.message);}}
 $('import').onclick=importText;
@@ -221,7 +226,7 @@ for(const id of ['search','sort','filter','genderFilter','dormFilter'])$(id).add
 $('returnTarget').ondragover=e=>{e.preventDefault();$('returnTarget').classList.add('over');};$('returnTarget').ondragleave=()=>$('returnTarget').classList.remove('over');$('returnTarget').ondrop=e=>{e.preventDefault();$('returnTarget').classList.remove('over');removeNames(dragNames);};
 $('complete').onclick=()=>{const ids=JOBS.filter(j=>state.jobs[j.id].length&&draftInspectionStatus(j.id)!=='redo').map(j=>j.id);if(!ids.length)return tell('没有可选择的岗位');inspectJobs(ids,'pass');};$('saveInspection').onclick=saveInspection;$('cancelInspection').onclick=()=>{inspectionDraft={};render();tell('已取消修改，恢复上次保存的验收结果');};$('undo').onclick=()=>{if(!history.length)return;inspectionDraft={};state=JSON.parse(history.pop());NAMES=state.students.map(s=>s.name);selected.clear();render();tell('已撤销上一步');};$('reset').onclick=()=>{if(!confirm('清空本机学生库、安排和完成记录？'))return;record();state=initial();photoCache={};persistPhotos({}).catch(()=>tell('照片清理失败，请重试'));NAMES=state.students.map(s=>s.name);selected.clear();$('filter').value='ready';$('search').value='';render();};$('date').onchange=()=>{if(Object.keys(inspectionDraft).length&&!confirm('验收修改尚未保存，放弃修改并切换日期？')){$('date').value=state.date;return;}if(!$('date').value){$('date').value=state.date;return;}record();archiveDay();loadDay($('date').value);selected.clear();render();};
 function announcementPayload(){return {schema:'duty-board-v1',version:1,date:state.date,className:state.className,generatedAt:new Date().toISOString(),assignments:JOBS.filter(j=>state.jobs[j.id].length).map(j=>({id:j.id,area:j.area,task:j.label,allowOverlap:!!j.temporary,temporary:!!j.temporary,names:state.jobs[j.id],roles:j.room?dormRoles(j.room).slice(0,state.jobs[j.id].length):[],notes:state.jobs[j.id].map(n=>j.cloudNotes?.[n]??(dutyPersonRework(j,n)?'返工':j.temporary?'临时替补':j.room&&isSupplement(n,j.room)?'补充人员':''))}))};}
-$('publish').onclick=async()=>{if(!Object.values(state.jobs).some(ns=>ns.length))return tell('先安排人员，再导出公告');const missing=JOBS.filter(j=>state.jobs[j.id].length<j.cap);if(missing.length&&!confirm('以下岗位未满：'+missing.map(j=>j.label).join('、')+'。仍要确认并导出公告数据吗？'))return;const payload=announcementPayload();try{if(!await exportAnnouncementFile(payload))return;if(state.date===payload.date){record();state.published=true;window.DutyLayout?.published(payload.date);render();}tell('公告JS已导出，请在展示端选择该文件导入');}catch(err){tell('导出失败：'+err.message+'，请重试');}};$('print').onclick=()=>{buildPrint();window.print();};render();
+$('publish').onclick=async()=>{if(!Object.values(state.jobs).some(ns=>ns.length))return tell('先安排人员，再导出公告');const missing=JOBS.filter(j=>!jobAutoBlocked(j.id)&&state.jobs[j.id].length<j.cap);if(missing.length&&!confirm('以下岗位未满：'+missing.map(j=>j.label).join('、')+'。仍要确认并导出公告数据吗？'))return;const payload=announcementPayload();try{if(!await exportAnnouncementFile(payload))return;if(state.date===payload.date){record();state.published=true;window.DutyLayout?.published(payload.date);render();}tell('公告JS已导出，请在展示端选择该文件导入');}catch(err){tell('导出失败：'+err.message+'，请重试');}};$('print').onclick=()=>{buildPrint();window.print();};render();
 
 $('auto').onclick=automatic;
 for(const key of ['deep','zone2'])$(key).onchange=()=>{if(state.done.length){$(key).checked=state[key];return tell('当天已验收，请先撤销验收');}if(Object.values(state.jobs).some(a=>a.length)&&!confirm('切换模式会清空当天安排，再点击自动分配。是否继续？')){$(key).checked=state[key];return;}record();state[key]=$(key).checked;state.importedJobs=null;state.reworkNames={};state.jobs={};state.published=false;selected.clear();render();};
@@ -232,8 +237,8 @@ $('libraryFile').onchange=async e=>{const file=e.target.files[0];if(!file)return
 $('dormFile').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{const payload=parseDataJS(await file.text()),dorm=checkedRooms(payload.dorm||payload);if(!confirm('更新宿舍成员并清空当天安排，是否继续？'))return;record();state.dorm=dorm;state.days={};state.importedJobs=null;state.reworkNames={};state.jobs={};state.done=[];state.tempJobs=[];state.tempDone={};state.tempReceipts={};state.tempPending=[];state.carriedDefs=[];state.carryovers={};state.published=false;selected.clear();render();tell('宿舍成员已更新，请自动分配');}catch(err){tell(err.message);}finally{e.target.value='';}};
 
 
-function archiveDay(){if(state.executionDate&&state.executionDate!==state.date)return;state.days=state.days||{};state.days[state.date]={jobs:JSON.parse(JSON.stringify(state.jobs)),done:[...state.done],absent:[...state.absent],point:[...state.point],published:state.published,deep:state.deep,zone2:state.zone2,presenceDate:state.presenceDate,info:state.info,cloudBase:state.cloudBase||null,fixedTemplate:state.fixedTemplate||'',dormReplacements:state.dormReplacements||[],importedJobs:state.importedJobs||null,reworkNames:state.reworkNames||{},jobKinds:state.jobKinds||{},inspections:state.inspections||{},acceptanceReceipts:state.acceptanceReceipts||{},carriedDefs:state.carriedDefs||[],tempJobs:state.tempJobs||[],tempDone:state.tempDone||{},tempReceipts:state.tempReceipts||{},tempPending:state.tempPending||[]};}
-function loadDay(date){const previous={absent:[...state.absent],deep:state.deep,zone2:state.zone2,presenceKnown:!!state.presenceDate};state.date=date;const d=state.days?.[date]?JSON.parse(JSON.stringify(state.days[date])):null;Object.assign(state,d||{jobs:{},done:[],absent:previous.absent,point:[],published:false,deep:previous.deep,zone2:previous.zone2,fixedTemplate:'',dormReplacements:[],importedJobs:null,reworkNames:{},presenceDate:previous.presenceKnown?date:'',info:'已沿用最近人员去向；可直接更新去向或自动分配。'});state.cloudBase=d?.cloudBase||null;state.completedRecords=d?.completedRecords||{};state.layoutLocked=!!d?.layoutLocked;state.workspaceDefs=d?.workspaceDefs||null;state.workspaceRoles=d?.workspaceRoles||null;state.workspaceFixed=d?.workspaceFixed||null;state.cloudBase=d?.cloudBase||null;state.jobKinds=d?.jobKinds||{};state.reworkNames=d?.reworkNames||{};state.inspections=d?.inspections||{};state.acceptanceReceipts=d?.acceptanceReceipts||{};state.carriedDefs=d?.carriedDefs||[];state.tempJobs=d?.tempJobs||[];state.tempDone=d?.tempDone||{};state.tempReceipts=d?.tempReceipts||{};state.tempPending=d?.tempPending||[];applyCarryovers();}
+function archiveDay(){if(state.executionDate&&state.executionDate!==state.date)return;state.days=state.days||{};state.days[state.date]={jobs:JSON.parse(JSON.stringify(state.jobs)),done:[...state.done],absent:[...state.absent],point:[...state.point],areaPlans:state.areaPlans||{},reworkReasons:state.reworkReasons||{},blockedJobs:state.blockedJobs||{},jobCaps:state.jobCaps||{},published:state.published,deep:state.deep,zone2:state.zone2,presenceDate:state.presenceDate,info:state.info,cloudBase:state.cloudBase||null,fixedTemplate:state.fixedTemplate||'',dormReplacements:state.dormReplacements||[],importedJobs:state.importedJobs||null,reworkNames:state.reworkNames||{},jobKinds:state.jobKinds||{},inspections:state.inspections||{},acceptanceReceipts:state.acceptanceReceipts||{},carriedDefs:state.carriedDefs||[],tempJobs:state.tempJobs||[],tempDone:state.tempDone||{},tempReceipts:state.tempReceipts||{},tempPending:state.tempPending||[]};}
+function loadDay(date){const previous={absent:[...state.absent],deep:state.deep,zone2:state.zone2,presenceKnown:!!state.presenceDate};state.date=date;const d=state.days?.[date]?JSON.parse(JSON.stringify(state.days[date])):null;Object.assign(state,d||{jobs:{},done:[],absent:previous.absent,point:[],published:false,deep:previous.deep,zone2:previous.zone2,fixedTemplate:'',dormReplacements:[],importedJobs:null,reworkNames:{},presenceDate:previous.presenceKnown?date:'',info:'已沿用最近人员去向；可直接更新去向或自动分配。'});state.cloudBase=d?.cloudBase||null;state.areaPlans=d?.areaPlans||{};state.reworkReasons=d?.reworkReasons||{};state.blockedJobs=d?.blockedJobs||{};state.jobCaps=d?.jobCaps||{};state.completedRecords=d?.completedRecords||{};state.layoutLocked=!!d?.layoutLocked;state.workspaceDefs=d?.workspaceDefs||null;state.workspaceRoles=d?.workspaceRoles||null;state.workspaceFixed=d?.workspaceFixed||null;state.cloudBase=d?.cloudBase||null;state.jobKinds=d?.jobKinds||{};state.reworkNames=d?.reworkNames||{};state.inspections=d?.inspections||{};state.acceptanceReceipts=d?.acceptanceReceipts||{};state.carriedDefs=d?.carriedDefs||[];state.tempJobs=d?.tempJobs||[];state.tempDone=d?.tempDone||{};state.tempReceipts=d?.tempReceipts||{};state.tempPending=d?.tempPending||[];applyCarryovers();}
 
 async function exportAnnouncementFile(payload){const filename=String(payload.className||'班级').replace(/[\\/:*?"<>|]/g,'_')+'_值日公告_'+payload.date+'.js';const text='window.DUTY_BOARD_DATA = '+JSON.stringify(payload,null,2)+';\n';const file=new File([text],filename,{type:'application/javascript;charset=utf-8'});if(true&&typeof navigator.share==='function'&&typeof navigator.canShare==='function'&&navigator.canShare({files:[file]})){try{await navigator.share({files:[file],title:payload.className+'值日公告'});return true;}catch(err){if(err.name==='AbortError'){tell('已取消导出，安排未重新确认');return false;}}}const url=URL.createObjectURL(file);const a=document.createElement('a');a.href=url;a.download=filename;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);return true;}
 function download(filename,text){const url=URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
@@ -243,7 +248,7 @@ try{setPoolCollapsed(localStorage.getItem('duty-pool-collapsed')==='true');}catc
 $('showPaste').onclick=()=>openPaste('attendance');$('showRework').onclick=openTaskDialog;$('hidePaste').onclick=()=>document.body.classList.remove('paste-open');$('showPreview').onclick=()=>document.body.classList.add('preview-open');$('hidePreview').onclick=()=>document.body.classList.remove('preview-open');$('showSettings').onclick=()=>document.body.classList.add('settings-open');$('closeSettings').onclick=()=>document.body.classList.remove('settings-open');$('finishMain').onclick=()=>$('complete').click();$('undoMain').onclick=()=>$('undo').click();
 $('backup').onclick=async()=>{await photoReady;save();download('值日管理_私有备份_'+state.date+'.json',JSON.stringify({...state,photos:photoCache}));};$('restore').onclick=()=>$('backupFile').click();
 $('backupFile').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;const data=JSON.parse(await file.text());if(!Array.isArray(data.students)||!data.jobs||!data.stats||!data.dormStats||!data.date||!data.counts||!data.dorm||!Array.isArray(data.done)||!Array.isArray(data.paused)||!Array.isArray(data.absent))throw Error('不是本管理端的完整备份');if(!confirm('恢复备份将替换本机记录，是否继续？'))return;await photoReady;const photos=Object.fromEntries(Object.entries(data.photos||{}).map(([n,v])=>[n,safePhoto(v)]).filter(([,v])=>v));await persistPhotos(photos);photoCache=photos;delete data.photos;record();state=data;NAMES=state.students.map(s=>s.name);selected.clear();render();tell('备份已恢复');}catch(err){tell(err.message);}finally{e.target.value='';}};
-$('exportJS').onclick=()=>{const payload={version:state.date,date:state.date,weekStart:state.date,weekLabel:state.date+'当日值日',dayOrder:[state.date],days:{[state.date]:JOBS.filter(j=>state.jobs[j.id].length).map(j=>({taskId:j.id,task:j.room?'宿舍 '+j.room:j.label,temporary:!!j.temporary,completionKind:j.completionKind,allowOverlap:!!j.temporary,names:state.jobs[j.id],notes:state.jobs[j.id].map(n=>dutyPersonRework(j,n)?'返工':j.temporary?'临时替补':j.room&&isSupplement(n,j.room)?'补充人员':'')}))}};download('duty-data-'+state.date+'.js','window.FIND_PERSON_DUTY_DATA = '+JSON.stringify(payload,null,2)+';\n');};
+$('exportJS').onclick=()=>{const payload={version:state.date,date:state.date,weekStart:state.date,weekLabel:state.date+'当日值日',dayOrder:[state.date],days:{[state.date]:JOBS.filter(j=>state.jobs[j.id].length).map(j=>({taskId:j.id,task:j.room?'宿舍 '+j.room:j.label,temporary:!!j.temporary,completionKind:j.completionKind,allowOverlap:!!j.temporary,names:state.jobs[j.id],notes:state.jobs[j.id].map(n=>j.cloudNotes?.[n]??(dutyPersonRework(j,n)?'返工':j.temporary?'临时替补':j.room&&isSupplement(n,j.room)?'补充人员':''))}))}};download('duty-data-'+state.date+'.js','window.FIND_PERSON_DUTY_DATA = '+JSON.stringify(payload,null,2)+';\n');};
 function currentDormReplacements(){const records=[];for(const j of JOBS.filter(j=>j.room)){const base=fixedRoomNames(j.room);if(!base)continue;const current=state.jobs[j.id]||[],missing=base.filter(n=>!current.includes(n)&&(state.absent.includes(n)||state.paused.includes(n)||reworkResting(n))),extras=current.filter(n=>!base.includes(n));const usedOld=new Set(),usedNew=new Set();for(const r of state.dormReplacements||[]){if(r.room===j.room&&missing.includes(r.oldName)&&extras.includes(r.newName)&&!usedOld.has(r.oldName)&&!usedNew.has(r.newName)){records.push({...r,reason:dormUnavailableReason(r.oldName)});usedOld.add(r.oldName);usedNew.add(r.newName);}}const remaining=missing.filter(n=>!usedOld.has(n)),newNames=extras.filter(n=>!usedNew.has(n));for(let i=0;i<Math.min(remaining.length,newNames.length);i++)records.push({room:j.room,oldName:remaining[i],newName:newNames[i],reason:dormUnavailableReason(remaining[i])});}return records;}
 function buildPrint(){const sheet=$('printSheet');sheet.replaceChildren();const header=document.createElement('header');const title=document.createElement('h1');title.textContent=state.className+' · 值日安排';const date=document.createElement('p');date.textContent=state.date+' / '+(state.published?'已发布':'草稿');header.append(title,date);sheet.append(header);const columns=document.createElement('div');columns.className='print-columns';for(const group of ['教室与走廊','卫生区','宿舍值日']){const col=document.createElement('section');const heading=document.createElement('h2');heading.textContent=group;col.append(heading);const jobs=JOBS.filter(j=>state.jobs[j.id]?.length&&(group==='卫生区'?j.area.includes('卫生区'):j.area===group||(group==='教室与走廊'&&j.temporary)));if(!jobs.length)continue;for(const j of jobs){const row=document.createElement('div');row.className='print-row';const label=document.createElement('b');label.textContent=j.label;const names=document.createElement('div');if(j.room){state.jobs[j.id].forEach((n,i)=>{const line=document.createElement('div');line.textContent=n+(dutyPersonRework(j,n)?'（返工）':isSupplement(n,j.room)?'（补充）':'')+'：'+dormRoles(j.room)[i];names.append(line);});}else names.textContent=state.jobs[j.id].map(n=>n+(dutyPersonRework(j,n)?'（返工）':'')).join('、');row.append(label,names);col.append(row);}columns.append(col);}sheet.append(columns);const footer=document.createElement('footer');const replacements=currentDormReplacements();if(replacements.length){const note=document.createElement('div');note.className='print-substitutions';note.textContent='替补备注：'+replacements.map(r=>r.newName+'替补'+r.oldName+'（'+r.room+'，'+r.reason+'）').join('；')+'。';footer.append(note);}const hint=document.createElement('div');hint.textContent='按岗位完成任务，工具清洗归位。临时调整以最新公告为准。';footer.append(hint);sheet.append(footer);}
 window.addEventListener('beforeprint',buildPrint);
@@ -277,7 +282,7 @@ $('confirmDuty').onclick=()=>{if(!pendingDuty.length)return;record();archiveDay(
 let pasteMode='attendance';
 function heldRework(id){const redo=inspectionStatus(id)==='redo',temporary=JOBS.find(j=>j.id===id)?.temporary;return (state.jobs[id]||[]).filter(n=>state.done.includes(n)||tempComplete(id,n)||((temporary||JOBS.some(j=>j.temporary&&j.overlapNames?.includes(n))||state.reworkNames?.[n]||redo)&&personPresent(n)));}
 function heldReworkNames(){return [...new Set(Object.keys(state.jobs).flatMap(heldRework))];}
-function openPaste(mode){mobileScroll.people=0;setMobileView('people');setPoolCollapsed(false);if(mode==='rework'&&state.presenceDate!==state.date){tell('先粘贴这个日期的今日去向，再安排返工');mode='attendance';}pasteMode=mode;$('paste').value='';$('pasteTitle').textContent=mode==='attendance'?'① 粘贴找人App的今日去向':'③ 粘贴找人App点人的人员／事项';$('paste').placeholder=mode==='attendance'?'粘贴在册、实到、请假人数和请假名单的完整文字':'人员：姓名、姓名\n事项：需要完成的劳动任务\n也可只粘贴姓名';$('import').textContent=mode==='attendance'?'确认今日去向':'自动安排这些人员';$('reworkOptions').hidden=mode!=='rework';document.body.classList.add('paste-open');$('paste').focus();}
+function openPaste(mode){mobileScroll.people=0;setMobileView('people');setPoolCollapsed(false);if(mode==='rework'&&state.presenceDate!==state.date){tell('先粘贴这个日期的今日去向，再安排返工');mode='attendance';}pasteMode=mode;$('getPresenceCloud').hidden=mode!=='attendance';$('paste').value='';$('pasteTitle').textContent=mode==='attendance'?'① 获取或粘贴今日去向':'③ 粘贴找人App点人的人员／事项';$('paste').placeholder=mode==='attendance'?'粘贴在册、实到、请假人数和请假名单的完整文字':'人员：姓名、姓名\n事项：需要完成的劳动任务\n也可只粘贴姓名';$('import').textContent=mode==='attendance'?'确认今日去向':'自动安排这些人员';$('reworkOptions').hidden=mode!=='rework';document.body.classList.add('paste-open');$('paste').focus();}
 let pendingBatchResume=null;
 function resumeBatch(){if(!pendingBatchResume)return;const saved=pendingBatchResume;pendingBatchResume=null;openBatchDialog();$('batchText').value=saved.text;document.querySelector('input[name=batchPolicy][value='+saved.policy+']').checked=true;recognizeBatch();}
 $('batchAddArea').onclick=()=>{pendingBatchResume={text:$('batchText').value,policy:document.querySelector('input[name=batchPolicy]:checked').value};$('batchDialog').close();openTaskDialog();};
@@ -412,6 +417,15 @@ $('savePause').onclick=()=>{
     return Object.hasOwn(state.jobKinds||{},job.id)?note.replace(/返工|处罚/g,'').replace(/^[\s·、，；;]+|[\s·、，；;]+$/g,''):note;
    });
   }
+  for(const [i,row] of payload.assignments.entries()){
+   const job=assigned[i];if(!job)continue;
+   row.notes=row.names.map((name,k)=>{
+    const note=row.notes[k]||'',reason=state.reworkReasons?.[job.id]?.[name];
+    if(!reason||!dutyPersonRework(job,name))return note;
+    const extra=note.replace(/返工|处罚/g,'').replace(/^[\s·、，；;]+|[\s·、，；;]+$/g,'');
+    return ((extra?extra+' · ':'')+'返工：'+reason).slice(0,40);
+   });
+  }
   return payload;
  };
  const style=document.createElement('style');style.textContent='.job-kind-controls{display:flex;gap:6px;align-items:center;font-size:12px;color:#496b5b;margin:8px 0}.job-kind-controls select{max-width:100%;min-height:34px;padding:5px 8px;border:1px solid #bacfc1;border-radius:8px;background:#fff;color:#244e3b}.job-kind-controls select:disabled{opacity:.65}@media(max-width:700px){.job-kind-controls select{min-height:44px}}';document.head.append(style);
@@ -476,7 +490,7 @@ $('savePause').onclick=()=>{
  const confirmButton=document.createElement('button');confirmButton.id='layout-confirm';confirmButton.className='primary';confirmButton.type='button';$('auto').after(confirmButton);
  const note=document.createElement('div');note.id='layout-note';note.setAttribute('role','status');confirmButton.parentElement.after(note);
  const completed=document.createElement('section');completed.id='completed-records';completed.setAttribute('aria-label','当天已完成记录');
- const style=document.createElement('style');style.textContent='.auto-controls{flex-wrap:wrap;gap:8px}.auto-controls #auto,.auto-controls #showRework,.auto-controls #layout-confirm{flex:0 1 auto;max-width:100%;padding:9px 12px}.auto-controls #auto{flex:1 1 180px}#layout-confirm{min-height:44px;white-space:nowrap}#layout-note{padding:7px 16px;color:#496b5b;font-size:13px;line-height:1.5}.layout-locked #areas .person-card{cursor:default}.layout-locked #areas .remove-person{display:none}.layout-locked #pool .person-card{cursor:default}#completed-records{margin:12px 0;padding:14px;border:1px solid #b9cdbf;border-radius:14px;background:#f3f8f4}#completed-records h3{margin:0 0 6px;font-size:17px}#completed-records p{margin:6px 0;line-height:1.5;color:#496b5b}#completed-records .completion-row{padding:10px 0;border-top:1px solid #d6e2d9}#completed-records .completion-row button{min-height:40px;margin-top:6px}#areas .job[hidden],#areas .area[hidden],#completed-records[hidden]{display:none!important}';document.head.append(style);
+ const style=document.createElement('style');style.textContent='.auto-controls{flex-wrap:wrap;gap:8px}.auto-controls #auto,.auto-controls #showRework,.auto-controls #layout-confirm{flex:0 1 auto;max-width:100%;padding:9px 12px}.auto-controls #auto{flex:1 1 180px}#layout-confirm{min-height:44px;white-space:nowrap}#layout-note{padding:7px 16px;color:#496b5b;font-size:13px;line-height:1.5}.layout-locked #areas .person-card{cursor:default}.layout-locked #areas .remove-person{display:none}.layout-locked #pool .person-card{cursor:default}#completed-records{margin:12px 0;padding:14px;border:1px solid #b9cdbf;border-radius:14px;background:#f3f8f4}#completed-records h3{margin:0 0 6px;font-size:17px}#completed-records p{margin:6px 0;line-height:1.5;color:#496b5b}#completed-records .completion-row{padding:10px 0;border-top:1px solid #d6e2d9}#completed-records .completed-people{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0}#completed-records .completed-person{display:flex;align-items:center;gap:12px;min-width:190px;max-width:100%;padding:10px 14px;background:#fff;border:1px solid #c8ddce;border-radius:12px;box-sizing:border-box}#completed-records .completed-portrait{display:flex;align-items:center;justify-content:center;flex:0 0 56px;width:56px;height:72px;overflow:hidden;border-radius:8px;background:#e8efea;color:#718075;font-size:11px}#completed-records .completed-portrait img{width:100%;height:100%;object-fit:cover}#completed-records .completed-person strong{display:block;font-size:18px;overflow-wrap:anywhere}#completed-records .completed-status{display:block;margin-top:5px;font-size:13px;color:#39704e}@media(max-width:700px){#completed-records .completed-person{flex:1 1 200px;min-width:0}#completed-records .completed-portrait{flex-basis:48px;width:48px;height:64px}}#completed-records .completion-row button{min-height:40px;margin-top:6px}#areas .job[hidden],#areas .area[hidden],#completed-records[hidden]{display:none!important}';document.head.append(style);
  function canInspect(){
   if(state.date===(state.executionDate||state.date))return true;
   tell('验收日期不一致，请重新选择当天日期');return false;
@@ -505,7 +519,14 @@ $('savePause').onclick=()=>{
   for(const row of rows){
    const item=document.createElement('div');item.className='completion-row';
    const task=document.createElement('strong');task.textContent=row.area+' · '+row.task;
-   const names=document.createElement('p');names.textContent=row.names.join('、')+(row.completionKind==='rework'?' · 返工':'')+' · 已验收合格';
+   const names=document.createElement('div');names.className='completed-people';
+   for(const name of row.names){
+    const person=document.createElement('div');person.className='completed-person';
+    const portrait=document.createElement('span');portrait.className='completed-portrait';
+    const src=typeof photoCache==='undefined'?'':photoCache[name];
+    if(src){const img=document.createElement('img');img.src=src;img.alt=name+'照片';img.draggable=false;img.loading='lazy';img.onerror=()=>{img.remove();portrait.textContent='暂无照片';};portrait.append(img);}else portrait.textContent='暂无照片';
+    const details=document.createElement('div'),label=document.createElement('strong'),status=document.createElement('span');label.textContent=name;status.textContent=(row.completionKind==='rework'?'返工 · ':'')+'已验收合格';status.className='completed-status';details.append(label,status);person.append(portrait,details);names.append(person);
+   }
    const change=document.createElement('button');change.type='button';change.textContent='更正验收';
    change.onclick=()=>{
     if(window.DutyCounts?.isBusy())return tell('正在同步，请稍后');
@@ -633,39 +654,52 @@ $('savePause').onclick=()=>{
   }catch(e){state=JSON.parse(before);render();tell(e.message);}
  };
  $('saveInspection').onclick=saveInspection;
- const dialog=document.createElement('dialog');dialog.className='individual-dialog';dialog.setAttribute('aria-label','个人验收');
- const title=document.createElement('h3'),help=document.createElement('p'),list=document.createElement('div'),apply=document.createElement('button'),cancel=document.createElement('button');
- apply.type=cancel.type='button';apply.textContent='暂存个人结果';apply.className='primary';cancel.textContent='取消';cancel.onclick=()=>dialog.close();dialog.append(title,help,list,apply,cancel);document.body.append(dialog);
+ // Kept as an internal focus hook for completed-record correction.
  function open(id){
-  if(window.DutyCounts?.isBusy())return tell('正在同步，请稍后');
-  const j=JOBS.find(j=>j.id===id);if(!j)return;title.textContent=j.label+' · 个人验收';help.textContent='只调整需要处理的人。暂存后，点击“确认保存验收”生效。';list.replaceChildren();
-  for(const n of names(id)){
-   const label=document.createElement('label'),select=document.createElement('select');label.append(document.createTextNode(n+' '));select.dataset.name=n;select.setAttribute('aria-label',n+'验收结果');
-   for(const [value,text] of [['pending','待验收'],['pass','合格'],['redo','不合格重做']]){const o=document.createElement('option');o.value=value;o.textContent=text;select.append(o);}
-   select.value=people(id,inspectionDraft[id])[n];label.append(select);list.append(label);
-  }
-  apply.onclick=()=>{
-   const results=Object.fromEntries([...list.querySelectorAll('select')].map(s=>[s.dataset.name,s.value]));
-   if(names(id).some(n=>accepted(id,n)&&results[n]!=='pass')&&!confirm('本次会更正所选人员的已完成记录，并撤回对应次数；其他人的记录保留。继续暂存吗？'))return;
-   stage(id,results);dialog.close();tell('个人结果已暂存，点击“确认保存验收”后生效');
-  };dialog.showModal();
+  const controls=[...document.querySelectorAll('.student-review-select')].filter(e=>e.dataset.job===id);
+  const first=controls.find(e=>!e.disabled);if(first){first.scrollIntoView({block:'nearest'});first.focus();}
+ }
+ function reviewControl(id,n){
+  const label=document.createElement('label');label.className='student-review';
+  const caption=document.createElement('span');caption.textContent='验收';
+  const select=document.createElement('select');select.className='student-review-select';select.dataset.job=id;select.dataset.name=n;select.setAttribute('aria-label',n+'验收结果');
+  for(const [value,text] of [['pending','待验收'],['pass','合格'],['redo','不合格重做']]){const option=document.createElement('option');option.value=value;option.textContent=text;select.append(option);}
+  const value=people(id,inspectionDraft[id])[n];select.value=value;select.dataset.result=value;
+  select.disabled=!!window.DutyCounts?.isBusy();
+  const date=state.date,snapshot=JSON.stringify(names(id));
+  label.onclick=e=>e.stopPropagation();label.onkeydown=e=>e.stopPropagation();
+  select.onchange=e=>{
+   e.stopPropagation();
+   if(window.DutyCounts?.isBusy()){render();return tell('正在同步，请稍后');}
+   if(date!==state.date||snapshot!==JSON.stringify(names(id))){render();return tell('日期或人员已变化，请重新选择验收结果');}
+   if(accepted(id,n)&&select.value!=='pass'&&!confirm('更正 '+n+' 的已完成结果？保存验收后将撤回对应次数，其他人员不变。')){select.value=value;return;}
+   const results=people(id,inspectionDraft[id]);results[n]=select.value;stage(id,results);
+  };
+  label.append(caption,select);
+  if(inspectionDraft[id]){const hint=document.createElement('span');hint.className='student-review-draft';hint.textContent='未保存';label.append(hint);}
+  return label;
  }
  const held=heldRework;heldRework=id=>[...new Set([...held(id),...names(id).filter(n=>person(id,n)==='redo'&&personPresent(n))])];
  const baseRender=render;
  render=function(){
   baseRender();
   for(const card of document.querySelectorAll('#areas .job')){
-   const id=card.dataset.job;if(!names(id).length)continue;
-   const b=document.createElement('button');b.type='button';b.className='individual-open';b.textContent='👤 个人验收';b.disabled=!!window.DutyCounts?.isBusy();b.onclick=e=>{e.stopPropagation();open(id);};card.querySelector('.job-check').append(b);
-   for(const chip of card.querySelectorAll('.person-card')){const result=people(id,inspectionDraft[id])[chip.dataset.name];const badge=document.createElement('span');badge.className='individual-status';badge.textContent=({pass:'已合格',redo:'需重做',pending:'待验收'})[result];chip.querySelector('.person-details').append(badge);}
+   const id=card.dataset.job;card.querySelector('.job-check')?.remove();
+   for(const chip of card.querySelectorAll('.person-card')){
+    const n=chip.dataset.name,unit=document.createElement('div');unit.className='student-assignment';
+    chip.before(unit);unit.append(chip,reviewControl(id,n));
+   }
   }
   for(const item of document.querySelectorAll('#completed-records .completion-row')){
    const row=Object.values(state.completedRecords||{})[[...item.parentElement.querySelectorAll('.completion-row')].indexOf(item)];
    if(!row||!JOBS.some(j=>j.id===row.id)||!row.names.every(n=>names(row.id).includes(n)))continue;
-   const b=document.createElement('button');b.type='button';b.textContent='👤 个人更正';b.onclick=()=>open(row.id);item.append(b);
+   for(const [i,personCard] of [...item.querySelectorAll('.completed-person')].entries()){
+    const unit=document.createElement('div');unit.className='completed-student-unit';personCard.before(unit);unit.append(personCard,reviewControl(row.id,row.names[i]));
+   }
+   item.querySelector('button')?.remove();
   }
  };
- const style=document.createElement('style');style.textContent='.individual-dialog{max-width:480px;width:calc(100% - 40px);border:1px solid #b9cdbf;border-radius:14px;padding:20px}.individual-dialog p{font-size:14px;line-height:1.6}.individual-dialog label{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:12px 0}.individual-dialog select,.individual-dialog button,.individual-open{min-height:44px}.individual-dialog button{margin:8px 8px 0 0}.individual-status{display:block;font-size:12px;color:#416851}.individual-open{margin-top:4px}';document.head.append(style);
+ const style=document.createElement('style');style.textContent='.individual-dialog{max-width:480px;width:calc(100% - 40px);border:1px solid #b9cdbf;border-radius:14px;padding:20px}.individual-dialog p{font-size:14px;line-height:1.6}.individual-dialog label{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:12px 0}.individual-dialog select,.individual-dialog button,.individual-open{min-height:44px}.individual-dialog button{margin:8px 8px 0 0}.individual-status{display:block;font-size:12px;color:#416851}.individual-open{margin-top:4px}.student-assignment{display:flex;flex-direction:column;gap:6px;width:184px;max-width:100%;flex:0 0 184px;min-width:0}.student-review{display:flex;align-items:center;gap:6px;width:100%;font-size:12px;color:#496b5b;cursor:default}.student-review select{flex:1;min-width:0;width:0;height:32px;min-height:32px;padding:4px 7px;font-size:12px;border-radius:7px;background:#fff}.student-review select[data-result=pass]{color:#176d55;border-color:#80b99a;background:#f1faf4}.student-review select[data-result=redo]{color:#b53737;border-color:#d98282;background:#fff1f1}.student-review-draft{font-size:10px;color:#9d6a1b;white-space:nowrap}.completed-student-unit{display:flex;flex-direction:column;gap:6px;min-width:190px;max-width:100%}#completed-records .completed-student-unit .completed-person{margin:0}.duty-inline .student-assignment{width:100%;flex:1 1 100%}.duty-inline .student-assignment>.person-card{width:100%!important;max-width:none;flex:0 0 auto!important}.duty-inline .student-review select{height:38px;min-height:38px;font-size:14px}@media(max-width:700px){.completed-student-unit{flex:1 1 200px;min-width:0}}';document.head.append(style);
  window.DutyIndividuals={person,people,plan,remember,stage,open};render();
 })();
 
@@ -676,13 +710,32 @@ $('savePause').onclick=()=>{
  const bar=document.createElement('section');bar.className='plan-cloud-bar'+(mobile?' is-mobile':'');
  const button=document.createElement('button');button.id='dc-get-plan';button.className='primary';button.textContent='☁️ 获取所选日期安排';
  const status=document.createElement('span');status.id='dc-get-status';status.setAttribute('role','status');status.textContent='手动获取 → 临时调整 → 发布覆盖；不会自动获取。';
- bar.append(button,status);document.querySelector('#frame > header').after(bar);
+ bar.append(button,status);
+ if(mobile)document.querySelector('#frame > header').after(bar);
+ else{
+  document.body.classList.add('duty-compact-controls');
+  const controls=document.querySelector('.middle .auto-controls');controls.prepend(bar);
+  button.textContent='☁️ 获取安排';button.title='获取所选日期的云端安排；仅更新本机，不计次';
+  status.textContent='';$('auto').textContent='🎲 自动分配';$('auto').title='自动分配所选日期';
+  $('layout-confirm').after($('undoMain'));
+  const poolPanel=$('personnelPanel'),filterBar=$('genderFilter').parentElement;
+  const poolHead=poolPanel.querySelector('.panel-head'),poolActions=document.createElement('div');poolActions.className='pool-header-actions';poolActions.append($('managePause'),$('showPaste'),$('availableCount'));poolHead.append(poolActions);
+  const filters=document.createElement('details');filters.className='pool-extra-filters';
+  const summary=document.createElement('summary'),filterTitle=document.createElement('span');filterTitle.textContent='更多筛选';
+  const selection=poolPanel.querySelector('.selectionbar');summary.append(filterTitle,selection);filters.append(summary,filterBar);
+  $('search').parentElement.after(filters);
+  const updateFilters=()=>{const labels=[$('genderFilter').selectedOptions[0]?.textContent,$('dormFilter').selectedOptions[0]?.textContent].filter((v,i)=>i===0?!!$('genderFilter').value:!!$('dormFilter').value);filterTitle.textContent=labels.length?'筛选：'+labels.join(' · '):'更多筛选';};
+  for(const id of ['genderFilter','dormFilter'])$(id).addEventListener('change',updateFilters);
+
+ }
  const style=document.createElement('style');style.textContent='.plan-cloud-bar{padding:8px 24px 10px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;flex-shrink:0}.plan-cloud-bar button{min-height:44px}.plan-cloud-bar span{font-size:12px;color:#557164;line-height:1.5}.plan-cloud-bar.is-mobile{padding:10px 12px 0;gap:6px}.plan-cloud-bar.is-mobile button{width:100%}';document.head.append(style);
+ 
+ if(!mobile){const compact=document.createElement('style');compact.textContent='.duty-compact-controls #frame>header{height:56px;min-height:56px;flex-basis:56px;padding-block:6px}.duty-compact-controls .middle>.panel-head{padding:10px 16px 8px}.duty-compact-controls .middle>.panel-head .step{display:none}.duty-compact-controls .middle>.auto-controls{gap:6px;margin:0 16px 6px;align-items:center}.duty-compact-controls .auto-controls .plan-cloud-bar{display:contents}.duty-compact-controls .auto-controls #auto,.duty-compact-controls .auto-controls #dc-get-plan,.duty-compact-controls .auto-controls #layout-confirm,.duty-compact-controls .auto-controls #undoMain,.duty-compact-controls .auto-controls #showRework{flex:0 0 auto;width:auto;min-height:38px;padding:8px 10px;font-size:13px;white-space:nowrap}.duty-compact-controls .auto-controls label{white-space:nowrap}.duty-compact-controls .auto-controls #fixedTemplate{max-width:145px;font-size:12px;padding:8px}.duty-compact-controls .auto-controls #dc-get-status{order:10;flex:1 0 100%;font-size:12px;line-height:1.4}.duty-compact-controls #dc-get-status:empty{display:none}.duty-compact-controls #layout-note{padding:3px 16px 5px;font-size:12px;line-height:1.4}.duty-compact-controls .completion{padding:9px 18px}.duty-compact-controls.preview-open .right{top:56px}.duty-compact-controls #personnelPanel>.panel-head{padding:8px 14px 6px}.duty-compact-controls #personnelPanel>.panel-head .step{display:none}.duty-compact-controls #personnelPanel>.toolbar{padding:0 14px 6px;gap:6px}.duty-compact-controls #personnelPanel>.toolbar input,.duty-compact-controls #personnelPanel>.toolbar select{height:34px;padding:6px;font-size:12px}.duty-compact-controls #personnelPanel>.toolbar #search{width:100px}.duty-compact-controls #personnelPanel>.toolbar #sort{width:112px}.duty-compact-controls #personnelPanel>.toolbar #filter{width:128px}.duty-compact-controls .pool-extra-filters{margin:0 14px;border-top:1px solid #e5ece6}.duty-compact-controls .pool-extra-filters>summary{display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;min-height:30px;font-size:12px;color:#496b5b}.duty-compact-controls .pool-extra-filters>summary>span:before{content:"▸ ";color:#75827c}.duty-compact-controls .pool-extra-filters[open]>summary>span:before{content:"▾ "}.duty-compact-controls .pool-extra-filters .selectionbar{display:block;padding:0;background:none;font-size:12px}.duty-compact-controls .pool-extra-filters .selectionbar>span:last-child{display:none}.duty-compact-controls .pool-extra-filters>.toolbar{padding:4px 0 8px;flex-wrap:wrap;gap:6px}.duty-compact-controls .pool-extra-filters select,.duty-compact-controls .pool-extra-filters button{height:32px;min-height:32px;font-size:12px;padding:5px 8px}.duty-compact-controls #returnTarget{margin:4px 14px 0;padding:5px;font-size:11px}.duty-compact-controls #pool{padding-top:10px}.duty-compact-controls #personnelPanel>.footer-note{padding:7px 14px;font-size:10px}.duty-compact-controls #personnelPanel>.panel-head{align-items:flex-end;gap:8px}.duty-compact-controls #personnelPanel>.panel-head h2{flex:0 0 auto;line-height:1.2}.duty-compact-controls .pool-header-actions{display:flex;align-items:flex-end;gap:4px;margin-left:auto;min-width:0}.duty-compact-controls .pool-header-actions button{font-size:12px;line-height:1.2;min-height:29px;padding:6px;white-space:nowrap}.duty-compact-controls .pool-header-actions .badge{font-size:11px;line-height:1.2;padding:7px 6px;white-space:nowrap}';document.head.append(compact);}
  const scope=()=>JSON.stringify(cloud.getConfig());
  function hasAcceptance(){return (state.done||[]).length||Object.values(state.tempDone||{}).some(ns=>ns.length)||Object.keys(state.inspections||{}).length||Object.keys(state.acceptanceReceipts||{}).length;}
  function parse(plan,date){
   if(!plan||plan.schema!=='duty-board-v1'||plan.version!==1||plan.date!==date||!validDay(date)||typeof plan.className!=='string'||!Array.isArray(plan.assignments)||!plan.assignments.length||plan.assignments.length>100)throw Error('云端公告格式错误，本机安排未改变');
-  const jobs={},defs=[],reworkNames={},names=new Set(),ordinary=new Set();
+  const jobs={},defs=[],reworkReasons={},reworkNames={},names=new Set(),ordinary=new Set();
   for(const [i,row] of plan.assignments.entries()){
    if(!row||!['教室与走廊','1号卫生区','2号卫生区','宿舍值日','临时劳动'].includes(row.area)||typeof row.task!=='string'||!row.task.trim()||!Array.isArray(row.names)||!row.names.length||row.names.length>20||row.names.some(n=>typeof n!=='string'||!n.trim()||n.length>60)||new Set(row.names).size!==row.names.length)throw Error('云端岗位格式错误，本机安排未改变');
    for(const list of [row.roles,row.notes])if(list!=null&&(!Array.isArray(list)||list.length>row.names.length||list.some(v=>typeof v!=='string')))throw Error('云端任务备注格式错误');
@@ -692,12 +745,16 @@ $('savePause').onclick=()=>{
    if(Object.hasOwn(jobs,id))throw Error('云端宿舍岗位重复');
    for(const n of row.names){if(!row.temporary&&ordinary.has(n))throw Error('云端普通岗位存在重复姓名');if(!row.temporary)ordinary.add(n);names.add(n);}
    const cloudNotes=Object.fromEntries(row.names.map((n,k)=>[n,row.notes?.[k]||'']));
+   for(const n of row.names){
+    const match=cloudNotes[n].match(/^(?:(.*?) · )?返工：(.*)$/u);
+    if(match){(reworkReasons[id]||={})[n]=match[2];cloudNotes[n]=match[1]?'返工 · '+match[1]:'返工';}
+   }
    if(!row.temporary)for(const n of row.names)if(/返工|处罚/.test(cloudNotes[n]))reworkNames[n]=id;
    jobs[id]=[...row.names];defs.push({id,label:row.task,area:row.area,cap:row.names.length,temporary:!!row.temporary,reworkPeople:row.temporary?row.names.filter(n=>/返工|处罚/.test(cloudNotes[n])):undefined,room:room||undefined,maleOnly:known?.maleOnly||false,completionKind:row.names.every(n=>/返工|处罚/.test(cloudNotes[n]))?'rework':'normal',cloudRoles:[...(row.roles||[])],cloudNotes});
   }
   const missing=[...names].filter(n=>!NAMES.includes(n));
   if(missing.length&&state.students.some(s=>!s.cloudOnly))throw Error('云端有本机名单以外的学生：'+missing.join('、')+'。请先更新学生JS');
-  return {jobs,defs,reworkNames,missing};
+  return {jobs,defs,reworkNames,reworkReasons,missing};
  }
  button.onclick=async()=>{
   if(button.disabled)return;
@@ -719,7 +776,7 @@ $('savePause').onclick=()=>{
    record();archiveDay();
    for(const name of parsed.missing){state.students.push({id:name,name,aliases:[],gender:'',origin:'',rotationPaused:false,cloudOnly:true});state.counts[name]=state.counts[name]||0;}
    NAMES=state.students.map(s=>s.name);
-   state.jobs=parsed.jobs;state.jobKinds={};state.importedJobs=parsed.defs;state.reworkNames=parsed.reworkNames;state.className=entry.plan.className;
+   state.reworkReasons=parsed.reworkReasons;state.jobs=parsed.jobs;state.jobKinds={};state.importedJobs=parsed.defs;state.reworkNames=parsed.reworkNames;state.className=entry.plan.className;
    state.done=[];state.inspections={};state.acceptanceReceipts={};state.tempJobs=[];state.tempDone={};state.tempReceipts={};state.tempPending=[];state.carriedDefs=[];state.dormReplacements=[];state.point=[];
    state.cloudBase={date,revision:entry.revision,scope:cloud.getConfig().scope};state.published=true;
    state.info='已获取云端安排；仅更新本机计划，未计完成次数。'+(state.students.every(s=>s.cloudOnly)?'如需其他替补学生或照片，请导入完整学生JS。':'');
@@ -727,7 +784,7 @@ $('savePause').onclick=()=>{
    status.textContent=date+' 已获取 · 临时调整后点击「发布」覆盖云端。';tell('已获取已发布安排，未计完成次数；服务器未改变');
    if(window.DutyCounts)try{await window.DutyCounts.refresh({silent:true});}catch(error){status.textContent+=' 次数未更新：'+error.message;}
   }catch(e){status.textContent='获取未成功：'+e.message;tell(status.textContent);}
-  finally{button.disabled=false;button.textContent='☁️ 获取所选日期安排';}
+  finally{button.disabled=false;button.textContent=mobile?'☁️ 获取所选日期安排':'☁️ 获取安排';}
  };
  window.DutyPlanCloud={
   capture:()=>state.cloudBase?.date===state.date&&state.cloudBase.scope===cloud.getConfig().scope?{...state.cloudBase}:null,
@@ -792,7 +849,7 @@ $('savePause').onclick=()=>{
   for(const [date,d] of Object.entries(state.days||{})){
    const rows=[];
    for(const [id,names] of Object.entries(d.jobs||{})){
-    const task=[...(d.importedJobs||[]),...(d.tempJobs||[]),...(d.carriedDefs||[])].find(j=>j.id===id)||TASKS.find(j=>j.id===id);
+    const task=[...(d.importedJobs||[]),...(d.tempJobs||[]),...(d.carriedDefs||[])].find(j=>j.id===id)||(d.workspaceDefs||[]).find(j=>j.id===id)||Object.values(d.areaPlans||{}).flatMap(plan=>plan.tasks).find(j=>j.id===id)||TASKS.find(j=>j.id===id);
     const room=id.startsWith('dorm:')?id.slice(5):task?.room;
     const area=room?'宿舍值日':({'classroom':'教室与走廊','zone1':'1号卫生区','zone2':'2号卫生区'}[task?.area]||task?.area||'教室与走廊');
     const j={...task,id,room,label:room||task?.label||id,area,completionKind:d.jobKinds?.[id]||task?.completionKind};
@@ -894,8 +951,9 @@ $('savePause').onclick=()=>{
   const updates=pendingDuty.map(r=>({date:r.date,changes:r.defs.map(j=>row(j,r.jobs[j.id],r.reworkNames))}));busy=true;
   try{const result=await send(updates);$('dutyCount').checked=false;legacyHistory();accept(result);tell('历史值日已导入并同步云端次数；重复记录不重复计次');}catch(e){tell('历史计次未同步：'+e.message);}finally{busy=false;}
  };
- const legacyUndo=$('undo').onclick;
- $('undo').onclick=()=>{if(!active())return legacyUndo();const keep={counts:state.counts,stats:state.stats,dormStats:state.dormStats,cloudCounts:state.cloudCounts};legacyUndo();Object.assign(state,keep);hydrate();render();tell('已撤销本机安排操作；撤销云端验收请选“待验收”并确认保存');};
+ const undoButton=$('undo')||$('undoMain');
+ const legacyUndo=undoButton.onclick;
+ undoButton.onclick=()=>{if(!active())return legacyUndo();const keep={counts:state.counts,stats:state.stats,dormStats:state.dormStats,cloudCounts:state.cloudCounts};legacyUndo();Object.assign(state,keep);hydrate();render();tell('已撤销本机安排操作；撤销云端验收请选“待验收”并确认保存');};
  async function removeRecord(key,date){
   if(busy)throw Error('正在同步，请稍后');
   if(date!==state.date||Object.keys(inspectionDraft).length)throw Error('请先保存或取消当前验收修改');
@@ -905,54 +963,6 @@ $('savePause').onclick=()=>{
  }
  window.DutyCounts={refresh,hasCurrent:active,hydrate,removeRecord,isBusy:()=>busy};
  hydrate();render();
-})();
-
-// Mobile workflow: one board, contextual people sheet, inline acceptance.
-(function(){
- 'use strict';
- let reviewOpen=null,targetId=null,replacement=null,targetDate=null,actionBusy=false,pasteRouting=false,recentJob=null;
- const by=id=>document.getElementById(id),create=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
- document.body.classList.add('duty-inline');document.body.dataset.uiVersion='20261102-duty-inline-v1';
- const menu=document.createElement('dialog');menu.id='duMenu';menu.className='du-menu dialog';
- const menuHead=create('div','du-sheet-head');menuHead.append(create('h2','','工具与设置'));const menuClose=create('button','','完成');menuClose.onclick=()=>menu.close();menuHead.append(menuClose);menu.append(menuHead);
- const quick=create('div','du-menu-quick');for(const id of ['showPaste','managePause','showRework','showPreview'])quick.append(by(id));menu.append(quick,by('mobileMore'));document.body.append(menu);
- const menuButton=create('button','du-menu-button','☰');menuButton.id='duMenuButton';menuButton.setAttribute('aria-label','工具与设置');menuButton.onclick=()=>{document.activeElement?.blur?.();menu.showModal();};document.querySelector('#frame>header .header-actions').append(menuButton);
- const attendance=document.createElement('dialog');attendance.id='duAttendance';attendance.className='du-menu dialog';const ah=create('div','du-sheet-head');ah.append(create('h2','','今日去向'));const ac=create('button','','关闭');ac.onclick=()=>{attendance.close();document.body.classList.remove('paste-open');};ah.append(ac);attendance.append(ah,document.querySelector('#personnelPanel .import'));document.body.append(attendance);
- const picker=document.createElement('dialog');picker.id='duPeople';picker.className='du-sheet';picker.setAttribute('aria-label','就地选择值日人员');
- const ph=create('div','du-sheet-head');const phTitle=create('h2');phTitle.id='duPeopleTitle';const pc=create('button','','取消');pc.onclick=()=>picker.close();ph.append(phTitle,pc);
- const context=create('p','du-target-context');context.id='duTargetContext';
- const people=by('personnelPanel');const filterDetails=create('details','du-filters');filterDetails.append(create('summary','','更多筛选与排序'));const filterGrid=create('div','du-filter-grid');for(const id of ['filter','sort','genderFilter','dormFilter'])filterGrid.append(by(id));filterDetails.append(filterGrid);by('search').parentElement.after(filterDetails);
- const foot=create('div','du-picker-foot');const picked=create('span');picked.id='duPicked';const put=create('button','primary','放入岗位');put.id='duPut';foot.append(picked,put);picker.append(ph,context,people,foot);document.body.append(picker);
- const summary=create('div','du-summary');summary.id='duSummary';document.querySelector('.middle .panel-head').after(summary);
- const dock=create('nav','du-dock');dock.setAttribute('aria-label','常用操作');dock.id='duDock';const get=create('button','','获取安排'),saveReview=create('button','','保存验收'),publish=create('button','primary','发布');get.id='duFetch';saveReview.id='duSave';publish.id='duPublish';dock.append(get,saveReview,publish);document.body.append(dock);
- const undo=create('button','du-undo','↶');undo.setAttribute('aria-label','撤销上一步');undo.onclick=()=>by('undo').click();document.querySelector('.middle .auto-controls').append(undo);
- const cancelReview=create('button','du-cancel-review','取消验收修改');cancelReview.id='duCancelReview';cancelReview.onclick=()=>by('cancelInspection').click();summary.after(cancelReview);
- function busy(){return actionBusy||!!window.DutyCounts?.isBusy();}
- function updateDock(){const dirty=Object.keys(inspectionDraft).length;get.disabled=busy()||by('dc-get-plan').disabled;saveReview.disabled=busy()||!dirty||by('saveInspection').disabled;publish.disabled=busy()||by('dc-publish').disabled;saveReview.textContent=dirty?'保存验收 · '+dirty:'保存验收';cancelReview.hidden=!dirty;by('date').disabled=busy();menuButton.disabled=busy();summary.textContent=state.date+' · '+(state.published?'已发布':'本机草稿')+' · '+Object.values(state.jobs).flat().length+' 人次'+(dirty?' · '+dirty+'项验收待保存':'');}
- async function forward(source){if(busy())return;actionBusy=true;updateDock();try{return await by(source).onclick.call(by(source));}finally{actionBusy=false;decorate();}}
- get.onclick=()=>forward('dc-get-plan');saveReview.onclick=()=>forward('saveInspection');
- publish.onclick=()=>{if(busy())return;if(Object.keys(inspectionDraft).length)return tell('请先保存或取消验收修改，再发布');if(!state.layoutLocked){by('layout-confirm').click();if(!state.layoutLocked)return;}return forward('dc-publish');};
- function syncPicked(){const job=JOBS.find(j=>j.id===targetId);picked.textContent=selected.size?'已选 '+selected.size+' 人':'点选下面的学生';put.textContent=replacement?'替换此人':'放入此岗位';put.disabled=!job||!selected.size||busy();if(job)context.textContent=job.label+' · '+(replacement?'替换：'+replacement:'当前：'+((state.jobs[job.id]||[]).join('、')||'空岗'))+' · '+(state.jobs[job.id]||[]).length+'/'+job.cap+' 人';}
- function closePicker(){targetId=null;replacement=null;mobileTarget=null;multiMode=true;selected.clear();updateSelection();}
- picker.addEventListener('close',closePicker);
- function canEdit(){if(busy())return false;if(state.layoutLocked)by('layout-confirm').click();return !state.layoutLocked;}
- function openPicker(id,outgoing=null){if(!id||!JOBS.some(j=>j.id===id))return tell('先点需要调整的岗位');if(!canEdit())return;const job=JOBS.find(j=>j.id===id);if(outgoing&&state.done.includes(outgoing))return tell('该人员已验收，请使用更正验收');targetId=mobileTarget=id;targetDate=mobileTargetDate=state.date;replacement=job.temporary?null:outgoing;multiMode=!replacement;selected.clear();by('filter').value='all';by('search').value='';by('genderFilter').value='';by('dormFilter').value='';phTitle.textContent=job.label;render();syncPicked();if(!picker.open)picker.showModal();pc.focus({preventScroll:true});}
- mobileChooseJob=id=>openPicker(id);
- put.onclick=()=>{if(busy()||targetDate!==state.date)return tell('日期已变化，请重新点岗位');const job=JOBS.find(j=>j.id===targetId);if(!job||!selected.size)return;const names=[...selected],before=JSON.stringify(state.jobs);recentJob=targetId;if(replacement){if(names.length!==1)return tell('替换时请选择一人');swapInto(names[0],replacement);}else if(!job.temporary&&job.cap===1&&names.length===1&&state.jobs[job.id]?.length===1)swapInto(names[0],state.jobs[job.id][0]);else assign(job.id,names);if(JSON.stringify(state.jobs)!==before)picker.close();else syncPicked();};
- const baseRefresh=refreshMobileUI;refreshMobileUI=function(){baseRefresh();syncPicked();updateDock();};
- setMobileView=function(view){mobileView='jobs';document.body.dataset.mobileView='jobs';if(pasteRouting)return;if(view==='more'){menu.showModal();return;}if(view==='people'){if(targetId)openPicker(targetId);return;}if(picker.open)picker.close();refreshMobileUI();};
- const basePaste=openPaste;openPaste=function(mode){if(busy())return;menu.close();pasteRouting=true;try{basePaste(mode);}finally{pasteRouting=false;}if(picker.open)picker.close();attendance.showModal();by('paste').focus();};
- const attendanceImport=by('import').onclick;by('import').onclick=function(e){const result=attendanceImport.call(this,e);if(!document.body.classList.contains('paste-open'))attendance.close();return result;};by('hidePaste').onclick=()=>{attendance.close();document.body.classList.remove('paste-open');};
- menu.addEventListener('click',e=>{const b=e.target.closest('button');if(!b||b===menuClose)return;if(['importLibrary','importDorm','importFixedDorm','importDuty','showPaste','managePause','showRework','showPreview','restore','dc-config','backup','print','exportJS'].includes(b.id))menu.close();},true);
- by('showPreview').textContent='查看发布预览';by('showPreview').onclick=()=>{menu.close();document.body.classList.add('preview-open');};
- function reviewPeople(card,id){const j=JOBS.find(j=>j.id===id);if(!j||!(state.jobs[id]||[]).length)return;const controls=card.querySelector('.job-check');const button=create('button','du-review-open','验收');button.setAttribute('aria-expanded',String(reviewOpen===id));button.onclick=e=>{e.stopPropagation();reviewOpen=reviewOpen===id?null:id;decorate();};card.querySelector('.job-title').append(button);card.classList.toggle('du-reviewing',reviewOpen===id);
-  if(reviewOpen!==id||state.jobs[id].length<2)return;const list=create('div','du-person-review');for(const n of state.jobs[id]){const row=create('div','du-review-row'),name=create('strong','',n),choices=create('div','du-results');for(const [value,label] of [['pending','待验收'],['pass','合格'],['redo','重做']]){const b=create('button','',label);b.type='button';b.setAttribute('aria-label',n+'：'+label);const valueNow=window.DutyIndividuals.people(id,inspectionDraft[id])[n];b.setAttribute('aria-pressed',String(valueNow===value));b.disabled=busy();b.onclick=e=>{e.stopPropagation();if(valueNow===value)return;if((j.temporary?tempComplete(id,n):state.done.includes(n))&&value!=='pass'&&!confirm('更正 '+n+' 的已完成结果？保存验收后将撤回对应次数。'))return;const results=window.DutyIndividuals.people(id,inspectionDraft[id]);results[n]=value;window.DutyIndividuals.stage(id,results);};choices.append(b);}row.append(name,choices);list.append(row);}controls.after(list);
- }
- function decorate(){for(const card of document.querySelectorAll('#areas .job')){const id=card.dataset.job;card.querySelectorAll('.du-review-open,.du-person-review').forEach(e=>e.remove());const pick=card.querySelector('.mobile-pick');if(pick){pick.textContent=(state.jobs[id]||[]).length?'调整':'选人';pick.onclick=e=>{e.stopPropagation();if(window.DutyPersonProperties)return window.DutyPersonProperties.open(id);openPicker(id);};}card.classList.toggle('du-recent',id===recentJob);for(const chip of card.querySelectorAll('.person-card')){const n=chip.dataset.name;chip.onclick=e=>{e.stopPropagation();if(window.DutyPersonProperties)return window.DutyPersonProperties.open(id);openPicker(id,n);};chip.draggable=false;const remove=chip.querySelector('.remove-person');if(remove){const original=remove.onclick;remove.onclick=e=>{e.stopPropagation();if(canEdit())original(e);};}}card.onclick=e=>{if(e?.target?.closest('input,select,label,.temp-tools,.job-property,.person-property-open'))return;if((state.jobs[id]||[]).length){reviewOpen=reviewOpen===id?null:id;decorate();}else openPicker(id);};card.onkeydown=e=>{if(e.target===card&&['Enter',' '].includes(e.key)){e.preventDefault();card.onclick();}};reviewPeople(card,id);}
- for(const person of document.querySelectorAll('#pool .person'))person.draggable=false;for(const area of document.querySelectorAll('#areas>.area'))area.style.scrollMarginTop='140px';updateDock();syncPicked();}
- const baseRender=render;render=function(){baseRender();if(targetId&&targetDate!==state.date&&picker.open)picker.close();decorate();};
- const oldDate=by('date').onchange;by('date').onchange=function(e){const old=state.date;const r=oldDate.call(this,e);if(state.date!==old){reviewOpen=null;recentJob=null;if(picker.open)picker.close();decorate();}return r;};
- function viewportSheet(){const v=window.visualViewport;if(!v)return;document.documentElement.style.setProperty('--du-sheet-height',Math.max(200,v.height-24)+'px');document.documentElement.style.setProperty('--du-keyboard-bottom',Math.max(0,window.innerHeight-v.height-v.offsetTop)+'px');}window.visualViewport?.addEventListener('resize',viewportSheet);window.visualViewport?.addEventListener('scroll',viewportSheet);window.addEventListener('resize',viewportSheet);viewportSheet();document.body.dataset.mobileView='jobs';mobileView='jobs';render();
 })();
 
 // Individual assignment properties. Reuse ordinary per-person flags and keep
@@ -971,15 +981,18 @@ function dutyPersonRework(job,name,rework=state.reworkNames){
   if(Object.keys(inspectionDraft).length)return '请先保存或取消验收修改';
   return '';
  }
- function apply(id,results,date=state.date,snapshot=JSON.stringify(assigned(id))){
+ function apply(id,results,date=state.date,snapshot=JSON.stringify(assigned(id)),reasons=null){
   const problem=blocked();if(problem)return tell(problem);
   const j=JOBS.find(j=>j.id===id),names=assigned(id);
   if(date!==state.date||snapshot!==JSON.stringify(names)||!j)return tell('日期或岗位人员已变化，请重新打开调整窗口');
   if(Object.keys(results).length!==names.length||names.some(n=>!['normal','rework'].includes(results[n])))return tell('请为每位学生选择普通值日或返工');
   const changed=names.filter(n=>(dutyPersonRework(j,n)?'rework':'normal')!==results[n]);
-  if(!changed.length)return true;
+  const previous=state.reworkReasons?.[id]||{};
+  const next=Object.fromEntries(names.filter(n=>results[n]==='rework').map(n=>[n,String(reasons?.[n]??previous[n]??'').trim()]).filter(([,reason])=>reason));
+  if(!changed.length&&JSON.stringify(previous)===JSON.stringify(next))return true;
   if(changed.some(n=>accepted(j,n)||state.inspections?.[id]?.people?.[n]==='redo'||state.inspections?.[id]?.rework?.includes(n)))return tell('该学生已有验收或重做记录，请先更正为待验收并保存，再修改劳动性质');
   record();
+  state.reworkReasons||={};state.reworkReasons[id]=next;
   const rework=names.filter(n=>results[n]==='rework');
   if(!j.temporary){
    state.jobKinds||={};state.jobKinds[id]='normal';state.reworkNames||={};
@@ -991,14 +1004,15 @@ function dutyPersonRework(job,name,rework=state.reworkNames){
   }
   state.published=false;selected.clear();render();tell('人员设置已保存；重新发布后展示端生效，验收合格后按个人性质计次');return true;
  }
- const dialog=document.createElement('dialog');dialog.className='individual-dialog assignment-dialog';dialog.setAttribute('aria-label','调整人员');
- const title=document.createElement('h3'),help=document.createElement('p'),list=document.createElement('div'),addRow=document.createElement('div'),batch=document.createElement('div'),save=document.createElement('button'),cancel=document.createElement('button');
- help.textContent='在这里调整人员和劳动性质。更换、移除或添加时一并保存当前设置。';save.type=cancel.type='button';save.textContent='保存';save.className='primary';cancel.textContent='关闭';cancel.onclick=()=>dialog.close();dialog.append(title,help,batch,list,addRow,save,cancel);document.body.append(dialog);
+ const dialog=document.createElement('dialog');dialog.className='individual-dialog assignment-dialog';dialog.setAttribute('aria-label','岗位更多');
+ const title=document.createElement('h3'),help=document.createElement('p'),list=document.createElement('div'),slotTools=document.createElement('div'),batch=document.createElement('div'),save=document.createElement('button'),cancel=document.createElement('button');
+ help.textContent='设置区域、空位和人员性质。';save.type=cancel.type='button';save.textContent='保存';save.className='primary';cancel.textContent='×';cancel.className='close-icon window-close';cancel.setAttribute('aria-label','关闭岗位设置');cancel.title='关闭';cancel.onclick=()=>dialog.close();
+ const head=document.createElement('div'),footer=document.createElement('div');head.className='window-head';footer.className='window-footer';head.append(title,cancel);footer.append(save);dialog.append(head,help,slotTools,batch,list,footer);document.body.append(dialog);
  function open(id){
   const problem=blocked();if(problem)return tell(problem);
   const j=JOBS.find(j=>j.id===id);if(!j)return;
-  const date=state.date,snapshot=JSON.stringify(assigned(id));title.textContent=j.label+' · 调整人员';list.replaceChildren();batch.replaceChildren();addRow.replaceChildren();
-  const store=()=>apply(id,Object.fromEntries([...list.querySelectorAll('select[data-kind]')].map(s=>[s.dataset.name,s.value])),date,snapshot);
+  const date=state.date,snapshot=JSON.stringify(assigned(id));title.textContent=j.label+' · 更多';list.replaceChildren();batch.replaceChildren();slotTools.replaceChildren();
+  const store=()=>apply(id,Object.fromEntries([...list.querySelectorAll('select[data-kind]')].map(s=>[s.dataset.name,s.value])),date,snapshot,Object.fromEntries([...list.querySelectorAll("input[data-reason]")].map(input=>[input.dataset.reason,input.value])));
   const choosePerson=(outgoing=null)=>{
    const line=document.createElement('div');line.className='assignment-choose';const select=document.createElement('select');select.setAttribute('aria-label',outgoing?'更换'+outgoing:'选择添加人员');
    const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='选择学生';select.append(placeholder);
@@ -1011,8 +1025,15 @@ function dutyPersonRework(job,name,rework=state.reworkNames){
     if(JSON.stringify(state.jobs)!==before){const current=JOBS.find(x=>x.id===id);const results=Object.fromEntries(assigned(id).map(name=>[name,name===n?'normal':dutyPersonRework(current,name)?'rework':'normal']));apply(id,results);open(id);}
    };line.append(select,confirm);return line;
   };
+  const options=document.createElement('div');options.className='assignment-options';
+  const mask=document.createElement('button'),slot=document.createElement('button');mask.type=slot.type='button';mask.textContent=jobAutoBlocked(id)?'🔓 恢复自动分配':'🚫 屏蔽自动分配';mask.setAttribute('aria-pressed',String(jobAutoBlocked(id)));mask.title='保留现有人员，自动分配时跳过此岗位';
+  mask.onclick=()=>{if(!store())return;record();state.blockedJobs||={};if(jobAutoBlocked(id))delete state.blockedJobs[id];else state.blockedJobs[id]=true;render();open(id);};
+  slot.textContent='➕ 添加位置';slot.disabled=j.cap>=20;slot.onclick=()=>{if(!store())return;record();state.jobCaps||={};state.jobCaps[id]=j.cap+1;for(const defsList of defs())for(const def of defsList||[])if(def.id===id)def.cap=j.cap+1;state.published=false;render();open(id);tell('已添加空位，关闭窗口后拖入学生');};
+  const removeSlot=document.createElement('button');removeSlot.type='button';removeSlot.textContent='🗑️ 删除空位';removeSlot.disabled=j.cap<=Math.max(1,assigned(id).length);removeSlot.title=removeSlot.disabled?'先移除人员；至少保留一个位置':'删除一个未放人的位置';
+  removeSlot.onclick=()=>{if(!store())return;const current=JOBS.find(x=>x.id===id);if(!current||current.cap<=Math.max(1,assigned(id).length))return;record();const cap=current.cap-1;state.jobCaps||={};state.jobCaps[id]=cap;for(const defsList of defs())for(const def of defsList||[])if(def.id===id)def.cap=cap;state.published=false;render();open(id);tell('已删除一个空位');};
+  options.append(mask,slot,removeSlot);slotTools.replaceChildren(options);
   const bulkLabel=document.createElement('span');bulkLabel.textContent='批量设置';batch.className='assignment-bulk';batch.append(bulkLabel);
-  for(const [value,text] of [['normal','全员普通'],['rework','全员返工']]){const button=document.createElement('button');button.type='button';button.textContent=text;button.onclick=()=>{for(const s of list.querySelectorAll('select[data-kind]'))if(!s.disabled)s.value=value;};batch.append(button);}
+  for(const [value,text] of [['normal','全员普通'],['rework','全员返工']]){const button=document.createElement('button');button.type='button';button.textContent=text;button.onclick=()=>{for(const s of list.querySelectorAll('select[data-kind]'))if(!s.disabled){s.value=value;s.onchange();}};batch.append(button);}
   batch.hidden=!assigned(id).length;
   for(const n of assigned(id)){
    const row=document.createElement('div'),label=document.createElement('label'),select=document.createElement('select'),actions=document.createElement('div');row.className='assignment-person';actions.className='assignment-actions';label.append(document.createTextNode(n+' '));select.dataset.name=n;select.dataset.kind='true';select.setAttribute('aria-label',n+'劳动性质');
@@ -1021,10 +1042,14 @@ function dutyPersonRework(job,name,rework=state.reworkNames){
    select.value=dutyPersonRework(j,n)?'rework':'normal';select.disabled=!!fixed;label.append(select);row.append(label);
    const replace=document.createElement('button'),remove=document.createElement('button');replace.type=remove.type='button';replace.textContent='更换';remove.textContent='移除';replace.disabled=remove.disabled=!!fixed;
    replace.onclick=()=>{row.querySelector('.assignment-choose')?.remove();row.append(choosePerson(n));};
-   remove.onclick=()=>{if(!store())return;if(j.temporary)removeTemporaryPerson(id,n);else removeNames([n]);open(id);};actions.append(replace,remove);row.append(actions);list.append(row);
+   remove.onclick=()=>{if(!store())return;if(j.temporary)removeTemporaryPerson(id,n);else removeNames([n]);open(id);};actions.append(replace,remove);row.append(actions);
+   const reason=document.createElement('input');reason.type='text';reason.dataset.reason=n;reason.placeholder='返工原因（选填）';reason.setAttribute('aria-label',n+'返工原因');reason.value=state.reworkReasons?.[id]?.[n]||'';
+   const extra=String(j.cloudNotes?.[n]||'').replace(/返工|处罚/g,'').replace(/^[\s·、，；;]+|[\s·、，；;]+$/g,'');
+   reason.maxLength=Math.max(0,37-(extra?extra.length+3:0));reason.style.gridColumn='1 / -1';reason.style.width='100%';
+   select.onchange=()=>{reason.hidden=select.value!=='rework';};select.onchange();row.append(reason);list.append(row);
   }
   if(!assigned(id).length){const empty=document.createElement('p');empty.textContent='这个岗位还没有安排人员。';list.append(empty);}
-  if(assigned(id).length<j.cap)addRow.append(choosePerson());
+  // New members are placed directly by dragging into the job; replacement stays available above.
   save.onclick=()=>{if(store())dialog.close();};if(!dialog.open)dialog.showModal();
  }
  const baseRender=render;
@@ -1032,21 +1057,382 @@ function dutyPersonRework(job,name,rework=state.reworkNames){
   // A flag belongs to this assignment and must not leak into a new position.
   for(const [n,id] of Object.entries(state.reworkNames||{}))if(!assigned(id).includes(n))delete state.reworkNames[n];
   for(const list of defs())for(const d of list||[])if(d.reworkPeople)d.reworkPeople=d.reworkPeople.filter(n=>assigned(d.id).includes(n));
+  for(const [id,reasons] of Object.entries(state.reworkReasons||{})){
+   for(const n of Object.keys(reasons))if(!assigned(id).includes(n))delete reasons[n];
+  }
   baseRender();
   for(const card of document.querySelectorAll('#areas .job')){
    const j=JOBS.find(j=>j.id===card.dataset.job);if(!j)continue;
-   let button=card.querySelector('.mobile-pick');if(!button){button=document.createElement('button');button.type='button';button.className='assignment-open';card.querySelector('.job-title').append(button);}button.textContent='调整';button.disabled=!!blocked();button.onclick=e=>{e.stopPropagation();open(j.id);};
+   let button=card.querySelector('.mobile-pick');if(!button){button=document.createElement('button');button.type='button';button.className='assignment-open';card.querySelector('.job-title').append(button);}button.textContent='⋯';button.title='更多';button.setAttribute('aria-label',j.label+'：更多');button.disabled=!!blocked();card.classList.toggle('auto-blocked',jobAutoBlocked(j.id));if(jobAutoBlocked(j.id)){const badge=document.createElement('span');badge.className='auto-blocked-label';badge.textContent='自动分配已屏蔽';card.querySelector('.job-title').after(badge);}button.onclick=e=>{e.stopPropagation();open(j.id);};
    for(const chip of card.querySelectorAll('.person-card')){chip.onclick=e=>{e.stopPropagation();open(j.id);};}
 
   }
  };
- const style=document.createElement('style');style.textContent='.job-kind-controls,#areas .temp-tools>select{display:none!important}.assignment-open{min-height:40px;font-size:13px;flex-shrink:0}.person-kind-status{display:block;color:#9b4a16;font-size:12px;font-weight:700}.assignment-dialog{max-width:560px}.assignment-person{padding:12px 0;border-bottom:1px solid #dce4dc}.assignment-dialog .assignment-person label{margin:0;gap:10px}.assignment-actions{display:flex;gap:6px;justify-content:flex-end}.assignment-dialog .assignment-actions button{margin:6px 0 0;padding:5px 12px;min-height:36px}.assignment-choose{display:flex;gap:8px;align-items:center;margin-top:10px}.assignment-choose select{flex:1;min-width:0;max-width:100%}.assignment-dialog .assignment-choose button{margin:0;white-space:nowrap}.assignment-bulk{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.assignment-dialog .assignment-bulk button{margin:0;padding:6px 10px;font-size:13px}.assignment-bulk span{font-size:13px;color:#667b6d}.assignment-bulk[hidden]{display:none}';document.head.append(style);
+ const style=document.createElement('style');style.textContent='.assignment-options{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.assignment-options button{margin:0;font-size:14px}.assignment-options [aria-pressed=true]{background:#fff0d5;color:#80541a}.job.auto-blocked{background:#fff0f0!important;border:2px solid #dc4545!important;box-shadow:0 0 0 1px #dc45451a}.job.auto-blocked .slot{background:#fff8f8;border-color:#e6a2a2}.job.auto-blocked .auto-blocked-label{color:#ba2424;font-weight:700}.auto-blocked-label{display:block;color:#ba2424;font-size:12px;margin:6px 0}.assignment-open,.mobile-pick{font-size:24px!important;line-height:1;min-width:42px}.job-kind-controls,#areas .temp-tools>select{display:none!important}.assignment-open{min-height:40px;font-size:13px;flex-shrink:0}.job .job-title{align-items:flex-end;min-height:26px}.job .job-title .assignment-open,.job .job-title .mobile-pick{display:inline-flex;align-items:center;justify-content:center;width:28px!important;min-width:28px!important;height:26px!important;min-height:26px!important;padding:0!important;font-size:20px!important;line-height:1!important;flex:0 0 28px!important;align-self:flex-end;border-radius:7px}.job .job-title>span{margin-left:auto;align-self:flex-end}.person-kind-status{display:block;color:#9b4a16;font-size:12px;font-weight:700}.assignment-dialog{max-width:560px}.assignment-person{padding:12px 0;border-bottom:1px solid #dce4dc}.assignment-dialog .assignment-person label{margin:0;gap:10px}.assignment-actions{display:flex;gap:6px;justify-content:flex-end}.assignment-dialog .assignment-actions button{margin:6px 0 0;padding:5px 12px;min-height:36px}.assignment-choose{display:flex;gap:8px;align-items:center;margin-top:10px}.assignment-choose select{flex:1;min-width:0;max-width:100%}.assignment-dialog .assignment-choose button{margin:0;white-space:nowrap}.assignment-bulk{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.assignment-dialog .assignment-bulk button{margin:0;padding:6px 10px;font-size:13px}.assignment-bulk span{font-size:13px;color:#667b6d}.assignment-bulk[hidden]{display:none}';document.head.append(style);
  window.DutyPersonProperties={open,apply};render();
 })();
 
-</script><style>/* One board stays visible; long task names cannot widen the phone layout. */
-body.duty-inline{padding-bottom:calc(80px + env(safe-area-inset-bottom));overflow-x:hidden}
-.duty-inline #frame{max-width:640px;min-width:0}.duty-inline #frame>header{min-width:0}.duty-inline #frame>header .header-actions #showPreview{display:none!important}.duty-inline #frame>header .header-actions .du-menu-button{display:block;width:44px;min-width:44px;padding:0;font-size:23px}.duty-inline .header-actions{min-width:0}.duty-inline #frame>header h1{font-size:20px}.duty-inline main{padding:8px 10px 16px!important}.duty-inline main>.middle{display:flex!important;overflow:visible}.duty-inline main>.left,.duty-inline #mobileQuick,.duty-inline .mobile-nav,.duty-inline .mobile-action-bar,.duty-inline #mobilePlacement,.duty-inline .plan-cloud-bar,.duty-inline #layout-note{display:none!important}.duty-inline .middle>.panel-head{display:none}.duty-inline .auto-controls{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 44px;margin:10px 10px 12px;gap:7px}.duty-inline .auto-controls #auto{grid-column:1/2}.duty-inline .auto-controls #layout-confirm{grid-column:2/3}.duty-inline .auto-controls #showRework{display:none}.duty-inline .auto-controls>button{min-width:0;width:auto!important;font-size:13px!important;padding:8px!important}.duty-inline .auto-controls .du-undo{font-size:21px!important;grid-column:3/4;grid-row:1}.du-summary{padding:12px 12px 0;font-size:12px;line-height:1.5;color:#67806b;overflow-wrap:anywhere}.du-cancel-review{margin:8px 10px;font-size:12px;align-self:flex-start}.du-cancel-review[hidden]{display:none}.duty-inline .mobile-area-tabs{position:sticky;top:calc(68px + env(safe-area-inset-top));z-index:15;margin:0 0 10px;padding:7px 10px;background:#f7faf6;border-block:1px solid #e1e9df}.duty-inline .mobile-area-tabs button{min-height:40px;background:white}.duty-inline #areas{padding:0 8px 12px}.duty-inline .area{padding:0 8px 10px;margin-bottom:12px;min-width:0}.duty-inline .area h3{margin:0 -8px 9px;padding:9px}.duty-inline .area-module-title{font-size:15px}.duty-inline .job{min-width:0;max-width:100%;padding:10px}.duty-inline .job-title{display:flex;flex-wrap:wrap;gap:7px;font-size:14px;min-width:0;overflow-wrap:anywhere}.duty-inline .job-title>span{font-size:11px}.duty-inline .mobile-pick,.du-review-open{min-height:40px;font-size:12px;padding:6px 10px}.duty-inline .mobile-pick{margin-left:auto}.du-review-open[aria-expanded=true]{background:#e3efdf;border-color:#75a782}.duty-inline #areas .slots{gap:6px;margin-top:7px}.duty-inline #areas .person-card.chip,.duty-inline #areas .job:not(.wide-job) .person-card.chip{min-width:0;height:66px;min-height:66px;max-height:66px;padding:7px;gap:7px;cursor:pointer}.duty-inline #areas .job:not(.wide-job) .person-card.chip{width:100%;flex-basis:100%}.duty-inline #areas .person-card .portrait,.duty-inline #areas .job:not(.wide-job) .portrait{width:32px;height:45px;flex-basis:32px;font-size:9px}.duty-inline #areas .person-card strong,.duty-inline #areas .job:not(.wide-job) .person-card strong{font-size:15px}.duty-inline #areas .person-card .person-count{font-size:10px}.duty-inline #areas .person-meta,.duty-inline #areas .person-status{display:none}.duty-inline #areas .individual-status{font-size:10px}.duty-inline .person-details{min-width:0;overflow-wrap:anywhere}.duty-inline #areas .slot,.duty-inline #areas .job:not(.wide-job) .slot{height:50px;font-size:13px}.duty-inline .job-check,.duty-inline[data-mobile-view=jobs] .job-check{display:none!important}.duty-inline #areas .du-reviewing>.job-check{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin-top:9px}.duty-inline .job-check label{font-size:12px;min-width:0;padding:6px 4px;gap:3px;grid-column:auto!important;justify-content:center}.duty-inline .job-check input[type=radio]{width:16px;height:16px;min-height:16px}.duty-inline .individual-open{display:none}.du-person-review{margin-top:8px;border-top:1px solid #e2e9df}.du-review-row{padding-top:8px;display:flex;flex-wrap:wrap;align-items:center;gap:6px}.du-review-row strong{font-size:13px;flex:1;min-width:60px}.du-results{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px}.du-results button{font-size:11px;padding:6px;min-height:40px}.du-results button[aria-pressed=true]{background:#e1efdf;border-color:#77a782}.du-recent{box-shadow:0 0 0 2px #7bab88}.du-dock{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:640px;display:grid;grid-template-columns:1fr 1.35fr 1fr;gap:7px;padding:9px 12px calc(9px + env(safe-area-inset-bottom));background:#fffffff2;backdrop-filter:blur(15px);border-top:1px solid #d5e0d1;z-index:60}.du-dock button{font-size:14px;min-height:48px;padding:7px;min-width:0}.du-menu{padding:16px;max-width:600px}.du-menu #mobileMore{display:block!important;padding:0}.du-menu .mobile-card{padding:12px}.du-menu-quick{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:12px 0}.du-menu-quick button{min-width:0;font-size:13px}.du-sheet-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;background:#fff;flex-shrink:0}.du-sheet-head h2{font-size:17px;line-height:1.5;min-width:0;overflow-wrap:anywhere;margin:0}.du-sheet-head button{min-height:44px;padding:7px 12px;flex-shrink:0;font-size:14px}.du-sheet{position:fixed;inset:auto 0 0;margin:0 auto;box-sizing:border-box;width:100%;max-width:640px;height:min(72dvh,var(--du-sheet-height,72dvh));max-height:calc(100dvh - 70px);border:1px solid #c9d9c5;border-bottom:0;border-radius:20px 20px 0 0;padding:0;overflow:hidden;color:var(--ink);background:#f5f8f1}.du-sheet[open]{display:flex;flex-direction:column}.du-sheet::backdrop{background:#17332844}.du-target-context{padding:9px 14px;margin:0!important;background:#eaf2e3;color:#46664b;font-size:13px;line-height:1.5;flex-shrink:0;overflow-wrap:anywhere}.duty-inline .du-sheet .left{display:flex!important;flex-direction:column;border:0;border-radius:0;flex:1;min-height:0;overflow:auto;background:transparent}.du-sheet .panel-head,.du-sheet .selectionbar,.du-sheet .return-target,.du-sheet .footer-note{display:none}.du-sheet .toolbar{padding:10px 12px 0!important}.du-sheet .toolbar:empty{display:none}.du-sheet .toolbar #boxMode,.du-sheet .toolbar #all,.du-sheet .toolbar #clear{display:none}.du-sheet .pool{overflow:auto;flex:1;min-height:90px;padding:10px 12px;align-content:start}.du-sheet .pool .person{height:96px;min-height:96px;max-height:96px}.du-sheet .person-meta{display:none}.du-filters{padding:0 12px;margin:8px 0 0;font-size:13px}.du-filters summary{min-height:36px;padding:8px 0;color:#71876d}.du-filter-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.du-filter-grid select{width:100%!important;min-width:0!important;max-width:100%;font-size:14px!important}.du-picker-foot{display:flex;align-items:center;gap:8px;padding:9px 12px calc(9px + env(safe-area-inset-bottom));background:white;border-top:1px solid #dce5d7;flex-shrink:0}.du-picker-foot span{font-size:13px;flex:1}.du-picker-foot button{min-height:46px;font-size:14px}.du-menu .import{display:block!important;margin:0;padding:0;border:0}.du-menu .import .row b,#duAttendance #hidePaste{display:none}.du-menu .import textarea{width:100%;box-sizing:border-box;font-size:16px}.duty-inline .toast{bottom:calc(90px + env(safe-area-inset-bottom));z-index:200}.du-sheet .toolbar,.du-sheet .pool,.du-sheet .person,.du-sheet .person-details,.du-sheet .du-filter-grid,.du-sheet .du-picker-foot,.du-dock,.du-menu,.du-menu *{min-width:0}.duty-inline .area,.duty-inline .job,.duty-inline .jobs{min-width:0;max-width:100%}@media(max-width:360px){.duty-inline #frame>header{padding-inline:8px;gap:5px}.duty-inline #frame>header .header-actions{gap:5px}.duty-inline #frame>header .header-actions input#date{width:136px;min-width:0}.duty-inline #frame>header h1{font-size:18px;gap:5px}.duty-inline #frame>header .app-icon{width:25px;height:25px}.du-results button{font-size:10px;padding:5px}.duty-inline .job-title{font-size:13px}}
+// Consistent top-right close controls and compact, aligned small-window layouts.
+(function(){
+ 'use strict';
+ if(typeof document.getElementById!=='function')return;
+ function shell(panel,closeId){
+  if(!panel)return;panel.classList.add('window-panel');
+  const close=closeId?document.getElementById(closeId):panel.querySelector('.window-close');
+  if(!close)return;
+  close.classList.add('window-close');close.textContent='×';close.title='关闭';
+  if(panel.querySelector(':scope>.window-head'))return;
+  const title=panel.querySelector('h2,h3');if(!title)return;
+  const oldTitleParent=title.parentElement,oldCloseParent=close.parentElement;
+  const head=document.createElement('div');head.className='window-head';head.append(title,close);panel.prepend(head);
+  for(const parent of [oldTitleParent,oldCloseParent])if(parent!==panel&&parent!==head&&!parent.children.length&&!parent.textContent.trim())parent.remove();
+ }
+ shell(document.querySelector('.assignment-dialog'));
+ for(const [panel,close] of [['pauseDialog','closePause'],['dutyDialog','cancelDuty'],['taskDialog','closeTasks'],['batchDialog','closeBatch']])shell(document.getElementById(panel),close);
+ shell(document.querySelector('.dc-modal'),'dc-close');
+ for(const [panelId,actionId] of [['pauseDialog','savePause'],['dutyDialog','confirmDuty']]){
+  const panel=document.getElementById(panelId),action=document.getElementById(actionId);if(!panel||!action)continue;
+  const oldParent=action.parentElement,footer=document.createElement('div');footer.className='window-footer';footer.append(action);panel.append(footer);
+  if(oldParent!==panel&&!oldParent.children.length)oldParent.remove();
+ }
+ for(const footer of document.querySelectorAll('.labor-dialog-footer'))footer.classList.add('window-footer');
+ const settings=document.getElementById('settings');
+ if(settings&&!document.body.classList.contains('duty-inline')){
+  shell(settings,'closeSettings');settings.setAttribute('role','dialog');settings.setAttribute('aria-label','数据与备份');
+  const backup=document.getElementById('backup'),backupRow=backup.parentElement,group=document.createElement('section'),title=document.createElement('h3');group.className='window-section';title.textContent='本机备份';backupRow.before(group);group.append(title,backupRow);backupRow.classList.add('window-button-grid');document.getElementById('reset').classList.add('danger-action');
+  for(const row of settings.querySelectorAll('.data-imports .row'))row.classList.add('window-button-grid');
+  const counts=settings.querySelector('.dc-counts'),heading=counts?.querySelector('h3'),config=document.getElementById('dc-config');
+  if(counts&&heading){const head=document.createElement('div');head.className='window-section-head';heading.before(head);head.append(heading);if(config)head.append(config);const row=document.createElement('div');row.className='window-button-grid';head.after(row);for(const id of ['dc-count-get','dc-count-backup','dc-count-seed']){const button=document.getElementById(id);if(button)row.append(button);}}
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.body.classList.contains('settings-open')&&!document.querySelector('dialog[open]')){e.preventDefault();document.body.classList.remove('settings-open');document.getElementById('showSettings')?.focus();}});
+ }
+ const previewClose=document.getElementById('hidePreview');if(previewClose)previewClose.classList.add('window-close');
+ const style=document.createElement('style');style.textContent=`
+ .window-panel{border:1px solid #cbd8ce!important;border-radius:12px!important;padding:20px!important;box-shadow:0 16px 64px #19352f24;color:#19352f;max-height:85vh;overflow:auto}
+ dialog.window-panel{max-width:calc(100vw - 32px)}
+ .window-head{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:-20px 0 14px;padding:12px 0;border-bottom:1px solid #e1e8e2;background:#fbfcfa;border-radius:12px 12px 0 0;position:sticky;top:-20px;z-index:2}
+ .window-panel .window-head h2,.window-panel .window-head h3{margin:0!important;font-size:18px;line-height:1.4;min-width:0}
+ .window-panel .window-head .window-close,button.window-close{display:inline-flex!important;position:static!important;align-items:center;justify-content:center;width:32px!important;min-width:32px!important;height:32px!important;min-height:32px!important;flex:0 0 32px!important;margin:0!important;padding:0!important;border:1px solid transparent!important;border-radius:6px!important;background:transparent!important;color:#65736b!important;font:400 25px/1 -apple-system,BlinkMacSystemFont,sans-serif!important}
+ .window-panel .window-head .window-close:hover,button.window-close:hover{background:#d73535!important;border-color:#d73535!important;color:#fff!important}
+ .window-close:focus-visible{outline:2px solid #7caa92!important;outline-offset:2px}
+ .window-panel>p{font-size:13px!important;line-height:1.6;margin:0 0 14px!important;color:#6d7d72}
+ .window-panel button,.window-panel select{box-sizing:border-box}
+ .window-footer{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:16px;padding-top:12px;border-top:1px solid #e1e8e2}
+ .window-footer>button,.window-footer .row>button{min-height:36px;padding:7px 14px;font-size:13px;margin:0!important}
+ .window-panel.assignment-dialog{width:560px;max-width:calc(100vw - 32px)}
+ .window-panel.assignment-dialog .assignment-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 12px}
+ .window-panel.assignment-dialog .assignment-options button{width:100%;min-height:36px;height:36px;padding:6px 8px;margin:0;font-size:13px;white-space:nowrap}
+ .window-panel.assignment-dialog .assignment-bulk{padding:10px 0;margin:0;border-top:1px solid #e9eee9;border-bottom:1px solid #e9eee9;gap:8px}
+ .window-panel.assignment-dialog .assignment-bulk>span{width:60px;font-size:12px}
+ .window-panel.assignment-dialog .assignment-bulk button{min-height:32px;padding:5px 12px;margin:0;font-size:12px}
+ .window-panel.assignment-dialog .assignment-person{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;padding:12px 0}
+ .window-panel.assignment-dialog .assignment-person>label{display:grid;grid-template-columns:minmax(0,1fr) 126px;align-items:center;gap:12px;margin:0;font-size:14px}
+ .window-panel.assignment-dialog .assignment-person select{height:34px;min-height:34px;padding:5px 8px;font-size:13px}
+ .window-panel.assignment-dialog .assignment-actions{display:flex;gap:6px}
+ .window-panel.assignment-dialog .assignment-actions button{height:34px;min-height:34px;padding:5px 10px;margin:0;font-size:13px}
+ .window-panel.assignment-dialog .assignment-choose{grid-column:1/-1;margin:0}
+ .window-panel.assignment-dialog .assignment-choose button{min-height:34px;padding:5px 10px;font-size:13px}
+ .window-panel.assignment-dialog .window-footer>button{min-width:88px}
+ body:not(.duty-inline).settings-open #settings.window-panel{left:50%;top:50%;transform:translate(-50%,-50%);width:680px;max-width:calc(100% - 48px);max-height:calc(100% - 64px)}
+ #settings.window-panel>.muted{font-size:12px;line-height:1.5}
+ #settings.window-panel .data-imports{display:grid;grid-template-columns:2fr 1fr;gap:8px 16px;margin:0;padding:0 0 14px;border-bottom:1px solid #e1e8e2}
+ #settings.window-panel .data-imports h3{margin:0;font-size:14px}
+ #settings.window-panel .data-imports h3:first-of-type{grid-column:1;grid-row:1}
+ #settings.window-panel .data-imports h3:last-of-type{grid-column:2;grid-row:1}
+ #settings.window-panel .data-imports>.row:nth-of-type(1){grid-column:1;grid-row:2}
+ #settings.window-panel .data-imports>.row:nth-of-type(2){grid-column:2;grid-row:2;grid-template-columns:1fr}
+ #settings.window-panel .window-button-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+ #settings.window-panel .window-button-grid>button{width:100%;min-width:0;min-height:36px;margin:0;padding:7px 8px;font-size:13px;white-space:nowrap}
+ #settings.window-panel .window-section{padding:14px 0 0}
+ #settings.window-panel .window-section>h3{font-size:14px;margin:0 0 8px}
+ #settings.window-panel .danger-action{background:#fff8f8;color:#ad3838;border-color:#e6c7c7}
+ #settings.window-panel .dc-counts{margin-top:14px;padding-top:14px}
+ #settings.window-panel .window-section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+ #settings.window-panel .window-section-head h3{font-size:15px;margin:0}
+ #settings.window-panel #dc-config{min-height:32px;font-size:12px;padding:5px 9px;margin:0}
+ #settings.window-panel .dc-counts>p{font-size:12px;margin:10px 0 0;line-height:1.5}
+ .dc-modal.window-panel .dc-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+ .dc-modal.window-panel .dc-row button{font-size:12px;min-height:36px;padding:7px}
+ .dc-modal.window-panel #dc-save{order:3}
+ @media(max-width:600px){.window-panel .task-catalog{grid-template-columns:1fr}.window-panel .catalog-task{min-width:0}.window-panel .catalog-task span{min-width:0;overflow-wrap:anywhere}.window-panel .custom-task{display:grid;grid-template-columns:minmax(0,1fr) 65px;gap:8px}.window-panel .custom-task input[type=checkbox]{width:20px!important;min-width:20px;flex:0 0 20px}.window-panel .custom-task>label{flex:1 0 100%}.window-panel .custom-task #customTaskName{min-width:0;width:100%;flex:1}.window-panel .batch-layout{grid-template-columns:1fr;gap:16px}.window-panel .labor-dialog-footer{flex-wrap:wrap;justify-content:space-between}.window-panel .labor-dialog-footer>span{font-size:12px;min-width:0}.window-panel.assignment-dialog .assignment-options{grid-template-columns:repeat(2,minmax(0,1fr))}.window-panel.assignment-dialog .assignment-options button:first-child{grid-column:1/-1}.window-panel.assignment-dialog .assignment-person{grid-template-columns:1fr}.window-panel.assignment-dialog .assignment-person>label{grid-template-columns:minmax(0,1fr) 140px}.window-panel.assignment-dialog .assignment-actions{justify-content:flex-end}.window-panel.assignment-dialog .assignment-choose{grid-column:1}.window-panel{padding:16px!important}.window-head{margin:-16px 0 12px;top:-16px;padding:10px 0}.window-footer{margin-top:12px}}
+ `;document.head.append(style);
+})();
 
-#duPeople{bottom:var(--du-keyboard-bottom,0px)}
-</style></html>
+// A saved template belongs to the local library. Each date keeps its own copy.
+(function(){
+ 'use strict';
+ const mobile=typeof setMobileView==='function';
+ const areas={classroom:'教室与走廊',zone1:'1号卫生区',zone2:'2号卫生区'};
+ const opener=document.createElement('button');
+ opener.type='button';opener.textContent='📋 区域模板';opener.id='areaTemplates';
+ $('showRework').after(opener);
+ const dialog=document.createElement('dialog');
+ dialog.className='window-panel template-dialog';
+ dialog.setAttribute('aria-label','区域模板');
+ dialog.innerHTML=`<div class="window-head"><h3>区域模板</h3><button type="button" class="window-close" aria-label="关闭区域模板">×</button></div>
+ <div class="template-fields"><label>区域<select class="area"></select></label><label>读取模板<select class="library"></select></label></div>
+ <label>模板名称<input class="plan-name" maxlength="40" placeholder="例如：操场北侧"></label>
+ <div class="template-rows"></div><button class="add-row">＋ 添加岗位</button>
+ <p class="template-feedback" role="status"></p><div class="window-footer"><button class="store">保存模板</button><button class="apply primary">保存并应用到当天</button></div>`;
+ document.body.append(dialog);
+ const find=s=>dialog.querySelector(s);
+ const area=find('select.area'),library=find('.library'),name=find('.plan-name'),rows=find('.template-rows'),feedback=find('.template-feedback');
+ for(const [id,label] of Object.entries(areas))area.add(new Option(label,id));
+ let date,sourceId;
+ function row(task){
+  const el=document.createElement('div');el.className='template-row';el.dataset.id=task.id;
+  el.innerHTML=`<input class="task-name" aria-label="岗位名称" maxlength="60" placeholder="岗位名称"><input class="capacity" aria-label="人数" type="number" min="1" max="20"><button class="remove" aria-label="删除岗位" title="删除岗位">×</button>
+  <div class="task-flags"><label><input type="checkbox" class="deep">仅大扫除</label><label><input type="checkbox" class="male">仅男生</label><label><input type="checkbox" class="blocked">屏蔽自动分配</label></div>`;
+  el.querySelector('.task-name').value=task.label;el.querySelector('.capacity').value=task.count;
+  for(const [key,checked] of [['deep',task.mode==='deep'],['male',task.maleOnly],['blocked',task.blocked]])el.querySelector('.'+key).checked=!!checked;
+  el.querySelector('.remove').onclick=()=>el.remove();rows.append(el);
+ }
+ function refreshLibrary(){
+  library.replaceChildren(new Option('从当天岗位编辑',''));
+  for(const plan of state.areaTemplates||[])if(plan.area===area.value)library.add(new Option(plan.name,plan.id));
+ }
+ function load(){
+  const key=area.value,plan=(state.areaTemplates||[]).find(p=>p.id===library.value);
+  const current=state.areaPlans?.[key];
+  let tasks=plan?.tasks;
+  if(!tasks){
+   tasks=configuredTasks().filter(t=>t.area===key&&t.mode!=='temporary').map(t=>({...t,count:state.jobCaps?.[t.id]??t.count,blocked:jobAutoBlocked(t.id)}));
+   if(state.importedJobs?.length)tasks=JOBS.filter(j=>!j.temporary&&j.area===areas[key]).map(j=>({...j,count:j.cap,blocked:jobAutoBlocked(j.id)}));
+  }
+  sourceId=plan?.id||current?.id;name.value=plan?.name||current?.name||areas[key]+'模板';
+  rows.replaceChildren();tasks.forEach(row);feedback.textContent='';
+ }
+ function store(apply){
+  const key=area.value,title=name.value.trim(),tasks=[],labels=new Set();
+  if(!title)return feedback.textContent='请填写模板名称';
+  for(const el of rows.children){
+   const label=el.querySelector('.task-name').value.trim(),count=el.querySelector('.capacity').valueAsNumber;
+   if(!label||labels.has(label)||!Number.isInteger(count)||count<1||count>20)return feedback.textContent='请检查岗位名称和人数：名称须唯一，人数为 1–20。';
+   labels.add(label);tasks.push({id:el.dataset.id,label,area:key,count,mode:el.querySelector('.deep').checked?'deep':'daily',maleOnly:el.querySelector('.male').checked,blocked:el.querySelector('.blocked').checked});
+  }
+  if(!tasks.length)return feedback.textContent='请至少保留一个岗位';
+  const libraryPlans=state.areaTemplates||[],existing=libraryPlans.find(p=>p.area===key&&p.name===title);
+  if(!mobile&&existing&&existing.id!==sourceId)return feedback.textContent='此名称已使用，请从列表读取原模板，或换一个名称。';
+  const plan={id:(mobile?sourceId:existing?.id)||crypto.randomUUID(),area:key,name:title,tasks};
+  const region=JOBS.filter(j=>!j.temporary&&j.area===areas[key]);
+  if(window.DutyCounts?.isBusy())return feedback.textContent='正在同步，请稍后保存模板。';
+  if(apply){
+   if(tasks.some(t=>JOBS.some(j=>j.id===t.id&&j.area!==areas[key])))return feedback.textContent='此模板与当天其他区域的岗位编号重复，请重新添加同名岗位后应用。';
+   if(date!==state.date||state.layoutLocked||window.DutyCounts?.isBusy()||Object.keys(inspectionDraft).length)return feedback.textContent='请先解锁当天排版并完成验收修改，再应用模板。';
+   for(const j of region){
+    const people=state.jobs[j.id]||[],t=tasks.find(t=>t.id===j.id);
+    if(people.length&&(!t||t.label!==j.label||t.count<people.length||(t.mode==='deep'&&!state.deep)||(t.maleOnly&&people.some(n=>genderFor(n)!=='男'))))return feedback.textContent='「'+j.label+'」已有人员，请保留该岗位及其安排，或选择空白日期应用。';
+   }
+  }
+  record();if(!mobile)state.areaTemplates=[...libraryPlans.filter(p=>p.id!==plan.id),plan];
+  if(apply){
+   (state.areaPlans||={})[key]=structuredClone(plan);
+   state.jobCaps||={};state.blockedJobs||={};
+   for(const id of new Set([...region,...tasks].map(t=>t.id))){delete state.jobCaps[id];delete state.blockedJobs[id];}
+   for(const t of tasks)if(t.blocked)state.blockedJobs[t.id]=true;
+   state.carriedDefs=(state.carriedDefs||[]).filter(j=>!region.some(r=>r.id===j.id)||heldRework(j.id).length);
+   // Imported and confirmed layouts keep their other sections and dormitory roles.
+   for(const field of ['workspaceDefs','importedJobs'])if(state[field]?.length){
+    const visible=taskListFor().filter(t=>t.area===key).map(t=>({...t,area:areas[key],cap:t.count+heldRework(t.id).length}));
+    state[field]=[...state[field].filter(j=>j.temporary||j.area!==areas[key]),...visible];
+   }
+   for(const j of region)if(!tasks.some(t=>t.id===j.id)&&!state.jobs[j.id]?.length)delete state.jobs[j.id];
+   state.published=false;
+  }
+  render();if(!mobile){refreshLibrary();library.value=plan.id;sourceId=plan.id;}
+  if(apply){dialog.close();tell(title+'已应用到 '+date+'，可点击自动分配');}
+  else feedback.textContent='模板已保存';
+  if(!mobile)upload([plan]);
+ }
+ opener.onclick=()=>{date=state.date;refreshLibrary();load();dialog.showModal();};
+ area.onchange=()=>{refreshLibrary();load();};library.onchange=load;
+ find('.window-close').onclick=()=>dialog.close();
+ find('.add-row').onclick=()=>{row({id:'area:'+crypto.randomUUID(),label:'',count:1});rows.lastElementChild.querySelector('input').focus();};
+ find('.store').onclick=()=>store(false);find('.apply').onclick=()=>store(true);
+ const cloud=window.DutyCloud;
+ const cacheKey=()=> 'duty-template-cache-v1:'+String(cloud.getConfig().scope||'');
+ function cached(){try{return JSON.parse(localStorage.getItem(cacheKey())||'[]');}catch{return [];}}
+ const status=document.createElement('p');status.setAttribute('role','status');dialog.querySelector('.window-footer').before(status);
+ let uploadQueue=Promise.resolve();
+ function upload(plans){
+  if(!cloud.ready()){status.textContent='已存本机 · 连接教师云后可同步';return;}
+  const key=cacheKey();
+  async function run(){
+   try{
+    for(const template of plans){
+     if(cacheKey()!==key)throw Error('教师连接已切换');
+     const list=cached(),expectedRevision=list.find(p=>p.id===template.id)?.revision||null;
+     const r=await cloud.request({action:'templates-save',template,expectedRevision});
+     localStorage.setItem(key,JSON.stringify([...list.filter(p=>p.id!==template.id),r.template]));
+    }
+    status.textContent='已同步到云端';if(!dialog.open)tell(status.textContent);
+   }catch(e){status.textContent='本机已保存 · 待同步：'+e.message;if(!dialog.open)tell(status.textContent);}
+  }
+  status.textContent='正在同步…';uploadQueue=uploadQueue.then(run);
+ }
+ if(!mobile){
+  const sync=document.createElement('button');sync.textContent='同步已有模板';sync.onclick=()=>{
+   if(!cloud.ready())return cloud.open();
+   const plans=state.areaTemplates||[];if(!plans.length)return feedback.textContent='请先保存一个模板';upload(plans);
+  };dialog.querySelector('.window-footer').prepend(sync);
+  const clear=document.createElement('button');clear.id='clearJobPeople';clear.type='button';clear.textContent='🧹 清空岗位人员';opener.after(clear);
+  clear.onclick=()=>{
+   if(state.layoutLocked||Object.keys(inspectionDraft).length||window.DutyCounts?.isBusy())return tell('请先解锁排版，并完成当前验收或同步');
+   const keep=new Map(JOBS.map(j=>[j.id,(state.jobs[j.id]||[]).filter(n=>j.temporary?tempComplete(j.id,n):state.done.includes(n))]));
+   const count=JOBS.reduce((v,j)=>v+state.jobs[j.id].length-keep.get(j.id).length,0);
+   if(!count)return tell('没有待清空的人员');
+   if(!confirm('清空 '+state.date+' 的 '+count+' 个未完成岗位安排？保留岗位、人数、屏蔽设置和已完成记录。可撤销。'))return;
+   record();
+   for(const j of JOBS){
+    const removed=state.jobs[j.id].filter(n=>!keep.get(j.id).includes(n));
+    state.jobs[j.id]=keep.get(j.id);
+    if(removed.length&&state.inspections?.[j.id]){
+     const entry=state.inspections[j.id];
+     if(!state.jobs[j.id].length)delete state.inspections[j.id];
+     else{entry.names=JSON.stringify(state.jobs[j.id]);entry.status='pass';for(const n of removed)if(entry.people)delete entry.people[n];if(entry.rework)entry.rework=entry.rework.filter(n=>!removed.includes(n));}
+    }
+    for(const e of Object.values(state.carryovers||{}))if(e.def.id===j.id&&(e.targetDate===state.date||e.sourceDate===state.date))e.names=e.names.filter(n=>!removed.includes(n));
+    for(const defs of [state.tempJobs,state.carriedDefs,state.importedJobs,state.workspaceDefs])for(const d of defs||[])if(d.id===j.id){
+     for(const n of removed)if(d.cloudNotes)delete d.cloudNotes[n];
+     if(d.overlapNames)d.overlapNames=d.overlapNames.filter(n=>!removed.includes(n));
+    }
+   }
+   state.published=false;selected.clear();render();tell('已清空未完成的岗位人员，可撤销');
+  };
+ }else{
+  for(const selector of ['.template-fields','.plan-name','.template-rows','.add-row','.store']){const e=find(selector);(selector==='.plan-name'?e.parentElement:e).style.display='none';}
+  const picker=document.createElement('select'),preview=document.createElement('ul'),refresh=document.createElement('button');
+  picker.setAttribute('aria-label','选择云模板');refresh.textContent='获取云模板';find('.template-fields').before(refresh,picker,preview);
+  const applyButton=find('.apply');applyButton.textContent='应用到当天';
+  function show(){
+   const plan=cached().find(p=>p.id===picker.value);
+   applyButton.disabled=!plan;rows.replaceChildren();preview.replaceChildren();feedback.textContent='';
+   if(!plan)return;
+   area.value=plan.area;name.value=plan.name;sourceId=plan.id;
+   for(const t of plan.tasks){row(t);const li=document.createElement('li');li.textContent=t.label+' · '+t.count+' 人'+(t.blocked?' · 已屏蔽':'')+(t.maleOnly?' · 仅男生':'')+(t.mode==='deep'?' · 大扫除':'');preview.append(li);}
+   status.textContent='更新于 '+new Date(plan.updatedAt).toLocaleString('zh-CN');
+  }
+  function list(){
+   const selectedId=picker.value;picker.replaceChildren();
+   for(const p of cached())picker.add(new Option(areas[p.area]+' · '+p.name+'（'+p.tasks.length+'岗 / '+p.tasks.reduce((s,t)=>s+t.count,0)+'人）',p.id));
+   if([...picker.options].some(o=>o.value===selectedId))picker.value=selectedId;show();
+  }
+  picker.onchange=show;
+  refresh.onclick=async()=>{
+   if(!cloud.ready())return cloud.open();
+   const key=cacheKey();refresh.disabled=true;
+   try{const r=await cloud.request({action:'templates-read'});if(key!==cacheKey())return;
+    localStorage.setItem(key,JSON.stringify(r.templates));list();if(!r.templates.length)status.textContent='暂无云模板，请在 Mac 保存或同步已有模板';
+   }catch(e){status.textContent=e.message+(cached().length?' · 可使用缓存':'');}finally{refresh.disabled=false;}
+  };
+  opener.onclick=()=>{date=state.date;status.textContent='';list();dialog.showModal();if(cloud.ready())refresh.click();else status.textContent='请连接教师云以获取模板';};
+  window.addEventListener('duty-cloud-config',()=>{if(dialog.open){list();if(cloud.ready())refresh.click();}});
+ }
+
+ const style=document.createElement('style');
+ style.textContent=`.template-dialog{width:min(520px,94vw);box-sizing:border-box}.template-dialog .template-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}.template-dialog label{display:grid;gap:4px;margin:0 0 8px;font-size:13px}.template-dialog input:not([type=checkbox]),.template-dialog select{min-width:0;width:100%;box-sizing:border-box}.template-row{display:grid;grid-template-columns:minmax(0,1fr) 64px 32px;gap:6px;padding:8px 0;border-top:1px solid #dce4dc}.template-row .remove{padding:0;margin:0}.template-dialog .task-flags{grid-column:1/-1;display:flex;gap:12px;flex-wrap:wrap}.template-dialog .task-flags label{display:flex;align-items:center;gap:3px;margin:0}.template-feedback:empty{display:none}.assignment-person input[data-reason][hidden]{display:none!important}`;
+ document.head.append(style);
+})();
+
+// Fetch a preview; the existing confirmation applies all roster and layout checks.
+(function(){
+ const button=$('getPresenceCloud');
+ button.onclick=async()=>{
+  const cloud=window.DutyCloud;
+  if(!cloud.ready())return cloud.open();
+  const date=state.date,scope=cloud.getConfig().scope,original=$('paste').value;
+  button.disabled=true;button.textContent='获取中…';
+  try{
+   const data=await cloud.request({action:'presence-latest'});
+   if(state.date!==date||scope!==cloud.getConfig().scope||pasteMode!=='attendance'||!document.body.classList.contains('paste-open')||$('paste').value!==original)return;
+   if(data.text===null)return tell('尚未收到去向，请先在找人 App 发送');
+   if(typeof data.text!=='string'||!data.text.trim())throw Error('云端去向文字为空');
+   $('paste').value=data.text;
+   tell('已获取最新去向，确认后用于 '+date);
+  }catch(e){tell(e.message);}finally{button.disabled=false;button.textContent='☁️ 获取云端去向';}
+ };
+})();
+
+// Touch-first controls for the portable publisher.
+(function(){
+ if(typeof setMobileView!=='function')return;
+ const folded=new Set();
+ let vacancies=false;
+ const quick=$('mobileQuick'),get=$('dc-get-plan'),more=$('mobileMore');
+ if(get){quick.prepend(get);get.setAttribute('aria-label','获取已发布安排');}
+ $('showPaste').textContent='最新去向';
+ const settings=more.querySelector('.mobile-options');
+ settings.append($('managePause'));
+ const filter=document.createElement('button');filter.textContent='只看缺人';filter.setAttribute('aria-pressed','false');quick.append(filter);
+ const primary=document.createElement('button');primary.className='touch-publish primary';primary.textContent='预览并发布';primary.onclick=()=>$('showPreview').click();$('mobileSelectionBar').after(primary);
+ const maintenance=document.createElement('details');maintenance.className='mobile-card';
+ const summary=document.createElement('summary');summary.textContent='导入与维护';maintenance.append(summary);
+ for(const id of ['importDuty','print','exportJS','dc-count-seed'])if($(id))maintenance.append($(id));
+ more.append(maintenance);
+ const sheet=document.createElement('dialog');sheet.className='window-panel touch-picker';
+ sheet.innerHTML='<div class="window-head"><h3></h3><button class="window-close" aria-label="关闭">×</button></div><input type="search" placeholder="搜索可用学生" aria-label="搜索可用学生"><div class="touch-names"></div><button class="touch-properties">岗位与返工设置</button>';
+ document.body.append(sheet);
+ const search=sheet.querySelector('input'),list=sheet.querySelector('.touch-names');
+ sheet.querySelector('.window-close').onclick=()=>sheet.close();
+ function pick(job,outgoing){
+  if(state.layoutLocked)return tell('请先点「重新调整」解锁排版');
+  if(window.DutyCounts?.isBusy()||Object.keys(inspectionDraft).length)return tell('请先完成验收或同步');
+  const date=state.date,before=JSON.stringify(state.jobs);
+  sheet.querySelector('h3').textContent=job.label+(outgoing?' · 替换'+outgoing:' · 补人');
+  sheet.querySelector('.touch-properties').onclick=()=>{sheet.close();DutyPersonProperties.open(job.id);};
+  function choices(){
+   list.replaceChildren();
+   const names=NAMES.filter(n=>!state.jobs[job.id].includes(n)&&canEnter(n,job.id)&&n.includes(search.value.trim())).sort((a,b)=>Number(!!jobFor(a))-Number(!!jobFor(b)));
+   for(const n of names){
+    const b=document.createElement('button');b.textContent=n+(jobFor(n)?' · '+jobFor(n).label:'');b.onclick=()=>{
+     sheet.close();if(date!==state.date||before!==JSON.stringify(state.jobs)||state.layoutLocked||window.DutyCounts?.isBusy()||Object.keys(inspectionDraft).length)return tell('安排已变化，请重新选择');
+     if(outgoing)swapInto(n,outgoing);else assign(job.id,[n]);
+    };list.append(b);
+   }
+   if(!names.length)list.textContent='暂无符合条件的学生';
+   if(!NAMES.length||state.students.every(s=>s.cloudOnly)){const add=document.createElement('button');add.textContent='导入完整学生名单';add.onclick=()=>{sheet.close();setMobileView('more');$('importLibrary').click();};list.append(add);}
+  }
+  search.value='';search.oninput=choices;choices();sheet.showModal();
+ }
+ filter.onclick=()=>{vacancies=!vacancies;filter.setAttribute('aria-pressed',String(vacancies));render();};
+ const original=render;
+ render=function(){
+  original();primary.hidden=!Object.values(state.jobs).some(ns=>ns.length);
+  for(const area of document.querySelectorAll('#areas>.area')){
+   const heading=area.querySelector('.area-module-title');if(!heading)continue;
+   const key=area.dataset.area;
+   const toggle=document.createElement('button');toggle.className='touch-fold';let missing=0;
+   for(const card of area.querySelectorAll('.job')){
+    const j=JOBS.find(j=>j.id===card.dataset.job);if(!j)continue;
+    const need=jobAutoBlocked(j.id)?0:Math.max(0,j.cap-state.jobs[j.id].length);missing+=need;
+    card.classList.toggle('touch-filled',!need);
+    function tap(el,outgoing){
+     el.onclick=e=>{if(mobileView!=='jobs'||selected.size||e.target.closest('.remove-person'))return;e.stopPropagation();
+      if(outgoing&&(j.temporary||jobFor(outgoing)?.id!==j.id))DutyPersonProperties.open(j.id);else pick(j,outgoing);
+     };
+    }
+    for(const el of card.querySelectorAll('.slot'))tap(el,null);
+    for(const el of card.querySelectorAll('.person-card[data-name]'))tap(el,el.dataset.name);
+   }
+   area.classList.toggle('touch-folded',folded.has(key));area.classList.toggle('touch-full-area',!missing);
+   toggle.textContent=(folded.has(key)?'▸ ':'▾ ')+heading.textContent+(missing?' · 缺 '+missing+' 人':'');
+   toggle.setAttribute('aria-expanded',String(!folded.has(key)));toggle.onclick=()=>{if(folded.has(key))folded.delete(key);else folded.add(key);render();};
+   heading.replaceChildren(toggle);
+  }
+  document.body.classList.toggle('touch-vacancies',vacancies);
+  const done=$('completed-records');
+  if(done&&!done.hidden){const heading=done.querySelector('h3');if(heading){const b=document.createElement('button');b.className='touch-fold';b.textContent=heading.textContent;b.onclick=()=>document.body.classList.toggle('touch-show-done');heading.replaceChildren(b);}}
+ };
+ const style=document.createElement('style');style.textContent=`
+ body[data-mobile-view=jobs] .job .slot,body[data-mobile-view=jobs] .job .person-card{pointer-events:auto!important;cursor:pointer}
+ .touch-publish{display:none}body[data-mobile-view=jobs]:not(.mobile-has-bar):not(.preview-open):not(.paste-open) .touch-publish:not([hidden]){display:block;position:fixed;bottom:calc(64px + env(safe-area-inset-bottom));right:max(12px,calc((100vw - 616px)/2));z-index:32;border-radius:12px;padding:8px 16px}body[data-mobile-view=jobs] #areas{padding-bottom:65px}
+ .touch-picker{position:fixed;margin:auto auto 0;inset:auto 0 0;width:min(100%,620px);max-height:85dvh;border-radius:18px 18px 0 0;padding-bottom:calc(14px + env(safe-area-inset-bottom))}.touch-picker input{width:100%;box-sizing:border-box}.touch-names{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;max-height:46dvh;overflow:auto;margin:10px 0}.touch-names button{overflow-wrap:anywhere}
+ .touch-fold{background:transparent;color:inherit;border:none;text-align:left;font:inherit;padding:0 4px;min-height:44px}.touch-folded>.jobs,.touch-folded>.temp-summary,body:not(.touch-show-done) #completed-records .completion-row{display:none}
+ body[data-mobile-view=jobs].touch-vacancies .touch-filled,body[data-mobile-view=jobs].touch-vacancies .touch-full-area,body[data-mobile-view=jobs] .student-review,#mobileQuick #mobilePresenceInfo,#mobileAreaTabs,#doneTitle,#doneNames{display:none!important}
+ #mobileQuick{display:flex;gap:6px;flex-wrap:wrap}#mobileQuick button{min-height:44px;margin:0;font-size:14px}#mobileQuick [aria-pressed=true]{color:white;background:#226952}
+ body[data-mobile-view=jobs] .job .job-title .mobile-pick{min-width:44px!important;height:44px!important;flex-basis:44px!important}body[data-mobile-view=review] .student-review-select{min-height:44px!important}
+ body[data-mobile-view] .person-card.chip{min-height:66px;height:auto}body[data-mobile-view] .person-card.chip .portrait{width:36px;height:48px;flex:0 0 36px}.template-dialog>select{width:100%;margin:8px 0}.template-dialog ul{padding-left:1.4em;line-height:1.75}
+ .mobile-card summary{min-height:44px;cursor:pointer}.touch-properties{width:100%}
+ `;document.head.append(style);render();
+})();
+
+</script></html>
