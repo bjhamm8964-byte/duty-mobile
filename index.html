@@ -1612,13 +1612,25 @@ function dutyPersonRework(job,name,rework=state.reworkNames){
  };
  const style=document.createElement('style');style.textContent=`
  body[data-mobile-view=jobs] .job .slot,body[data-mobile-view=jobs] .job .person-card{pointer-events:auto!important;cursor:pointer}
- .touch-publish{display:none}body[data-mobile-view=jobs]:not(.mobile-has-bar):not(.preview-open):not(.paste-open) .touch-publish:not([hidden]){display:block;position:fixed;bottom:calc(64px + env(safe-area-inset-bottom));right:max(12px,calc((100vw - 616px)/2));z-index:32;border-radius:12px;padding:8px 16px}body[data-mobile-view=jobs] #areas{padding-bottom:65px}
+ .touch-publish{display:none}body[data-mobile-view=jobs]:not(.mobile-has-bar):not(.preview-open):not(.paste-open) .touch-publish:not([hidden]){display:block;position:fixed;bottom:calc(86px + env(safe-area-inset-bottom));right:max(12px,calc((100vw - 616px)/2));z-index:32;border-radius:12px;padding:8px 16px}body[data-mobile-view=jobs] #areas{padding-bottom:65px}
  .touch-picker{position:fixed;margin:auto auto 0;inset:auto 0 0;width:min(100%,620px);max-height:85dvh;border-radius:18px 18px 0 0;padding-bottom:calc(14px + env(safe-area-inset-bottom))}.touch-picker input{width:100%;box-sizing:border-box}.touch-names{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;max-height:46dvh;overflow:auto;margin:10px 0}.touch-names button{overflow-wrap:anywhere}
  .touch-fold{background:transparent;color:inherit;border:none;text-align:left;font:inherit;padding:0 4px;min-height:44px}.touch-folded>.jobs,.touch-folded>.temp-summary,body:not(.touch-show-done) #completed-records .completion-row{display:none}
  body[data-mobile-view=jobs].touch-vacancies .touch-filled,body[data-mobile-view=jobs].touch-vacancies .touch-full-area,body[data-mobile-view=jobs] .student-review,#mobileQuick #mobilePresenceInfo,#mobileAreaTabs,#doneTitle,#doneNames{display:none!important}
  #mobileQuick{display:flex;gap:6px;flex-wrap:wrap}#mobileQuick button{min-height:44px;margin:0;font-size:14px}#mobileQuick [aria-pressed=true]{color:white;background:#226952}
  body[data-mobile-view=jobs] .job .job-title .mobile-pick{min-width:44px!important;height:44px!important;flex-basis:44px!important}body[data-mobile-view=review] .student-review-select{min-height:44px!important}
- body[data-mobile-view] .person-card.chip{min-height:66px;height:auto}body[data-mobile-view] .person-card.chip .portrait{width:36px;height:48px;flex:0 0 36px}.template-dialog>select{width:100%;margin:8px 0}.template-dialog ul{padding-left:1.4em;line-height:1.75}
+ body[data-mobile-view] #areas .slots{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;align-items:start}
+ body[data-mobile-view] #areas .student-assignment{width:100%;min-width:0;gap:4px}
+ body[data-mobile-view] #areas .person-card.chip{width:100%;height:auto;min-height:60px;max-height:none;padding:6px 8px;gap:8px}
+ body[data-mobile-view] #areas .person-card.chip .portrait{width:34px;height:44px;flex:0 0 34px}
+ body[data-mobile-view] #areas .person-card.chip .person-details{flex:1;gap:2px;padding-right:24px}
+ body[data-mobile-view=review] #areas .person-card.chip .person-details,.layout-locked #areas .person-card.chip .person-details{padding-right:0}
+ body[data-mobile-view] #areas .person-card.chip strong{font-size:16px;line-height:1.25;overflow-wrap:anywhere}
+ body[data-mobile-view] #areas .person-card.chip .person-count{font-size:11px;line-height:1.3;white-space:normal}
+ body[data-mobile-view] #areas .person-card.chip .person-meta{display:none}
+ body[data-mobile-view] #areas .slot{width:100%;height:auto;min-height:44px}
+ body[data-mobile-view] #areas .job-title>span{margin-left:auto;margin-right:4px;align-self:center}
+ body[data-mobile-view] #areas .job-title{align-items:center}
+ .template-dialog>select{width:100%;margin:8px 0}.template-dialog ul{padding-left:1.4em;line-height:1.75}
  .mobile-card summary{min-height:44px;cursor:pointer}.touch-properties{width:100%}
  `;document.head.append(style);render();
 })();
