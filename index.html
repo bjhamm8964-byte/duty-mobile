@@ -270,7 +270,7 @@ function commitInspection(ids,status){if(ids.length===1&&JOBS.find(j=>j.id===ids
 function saveInspection(){syncInspectionDraft();const entries=Object.entries(inspectionDraft).sort(([a,x],[b,y])=>{if(x.status==='pass'||y.status==='pass')return (x.status==='pass'?1:0)-(y.status==='pass'?1:0);const order=id=>Math.max(0,...(state.jobs[id]||[]).map(n=>(JOBS.find(j=>j.id===id)?.temporary?state.tempReceipts?.[id]?.[n]:state.acceptanceReceipts?.[n])?.order||0));return order(b)-order(a);});if(!entries.length)return tell('没有待保存的验收修改');const before=JSON.stringify(state);try{for(const [id,entry] of entries)commitInspection([id],entry.status);history.push(before);if(history.length>30)history.shift();inspectionDraft={};selected.clear();render();tell('验收已保存，次数及次日重做安排已更新');}catch(err){state=JSON.parse(before);render();tell(err.message);}}
 function nextDutyDate(date){const d=new Date(date+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+1);return d.toISOString().slice(0,10);}
 function queueNextDay(ids,status){state.carryovers=state.carryovers||{};for(const id of ids){const key=state.date+':'+id;if(status!=='redo'){delete state.carryovers[key];continue;}const def=JOBS.find(j=>j.id===id);state.carryovers[key]={sourceDate:state.date,targetDate:nextDutyDate(state.date),def:{...def,...(def.temporary?{completionKind:'rework'}:{})},names:[...state.jobs[id]]};}}
-function applyCarryovers(){state.carriedDefs=state.carriedDefs||[];state.reworkNames=state.reworkNames||{};for(const entry of Object.values(state.carryovers||{}).filter(e=>e.targetDate===state.date)){const id=entry.def.id;const names=entry.names.filter(n=>NAMES.includes(n)&&!state.absent.includes(n)&&!state.paused.includes(n)&&!state.done.includes(n)&&!tempComplete(id,n));if(!names.length)continue;for(const n of names){for(const job of Object.keys(state.jobs))state.jobs[job]=state.jobs[job].filter(x=>x!==n);state.reworkNames[n]=id;}state.jobs[id]=[...names,...(state.jobs[id]||[]).filter(n=>!names.includes(n))].slice(0,Math.max(entry.def.cap,names.length));if(!state.carriedDefs.some(d=>d.id===id))state.carriedDefs.push({...entry.def});if(state.importedJobs&&!state.importedJobs.some(d=>d.id===id))state.importedJobs.push({...entry.def});} }
+function applyCarryovers(){state.carriedDefs=state.carriedDefs||[];state.reworkNames=state.reworkNames||{};for(const entry of Object.values(state.carryovers||{}).filter(e=>e.targetDate===state.date&&(!e.def.room||!window.DutyRotation))){const id=entry.def.id;const names=entry.names.filter(n=>NAMES.includes(n)&&!state.absent.includes(n)&&!state.paused.includes(n)&&!state.done.includes(n)&&!tempComplete(id,n));if(!names.length)continue;for(const n of names){for(const job of Object.keys(state.jobs))state.jobs[job]=state.jobs[job].filter(x=>x!==n);state.reworkNames[n]=id;}state.jobs[id]=[...names,...(state.jobs[id]||[]).filter(n=>!names.includes(n))].slice(0,Math.max(entry.def.cap,names.length));if(!state.carriedDefs.some(d=>d.id===id))state.carriedDefs.push({...entry.def});if(state.importedJobs&&!state.importedJobs.some(d=>d.id===id))state.importedJobs.push({...entry.def});} }
 function validDay(date){if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return false;const value=new Date(date+'T12:00:00Z');return !isNaN(value)&&value.toISOString().slice(0,10)===date;}
 function parseDutyHistory(payload){if(!NAMES.length)throw Error('先导入学生JS，以便核对姓名');const data=payload.duty||payload;if(!data.days||typeof data.days!=='object')throw Error('文件没有值日days数据');const entries=Object.entries(data.days),result=[];for(const [key,rows] of entries){if(!Array.isArray(rows))throw Error('值日任务格式错误');let date=validDay(key)?key:entries.length===1&&validDay(data.date)?data.date:null;if(!date&&validDay(data.weekStart)){const index=['周一','周二','周三','周四','周五','周六','周日'].indexOf(key);if(index<0)throw Error('无法确定执行日期：'+key);const start=new Date(data.weekStart+'T12:00:00Z');start.setUTCDate(start.getUTCDate()+index);date=start.toISOString().slice(0,10);}if(!date||!validDay(date))throw Error('缺少明确的执行日期，请核对date或weekStart');const jobs={},defs=[],reworkNames={},seen=new Set();for(const [index,row] of rows.entries()){if(!Array.isArray(row.names)||typeof row.task!=='string')throw Error('任务缺少名称或名单');if(!row.names.length)continue;const names=row.names.map(resolveName);if(new Set(names).size!==names.length)throw Error(date+'岗位内姓名重复');for(const n of names){if(seen.has(n)&&!row.temporary)throw Error(date+'同日重复姓名：'+n);if(!row.temporary)seen.add(n);}const room=roomFromTask(row);if(room&&dormRooms().length){const member=dormRooms().find(r=>r.room===room);if(!member||names.some(n=>!member.members.some(m=>dormMemberName(m)===n)))throw Error(date+'的'+room+'宿舍人员与成员库不符');}const id=room?'dorm:'+room:String(row.taskId||'imported:'+index);if(jobs[id])throw Error('同日重复岗位：'+id);jobs[id]=names;names.forEach((n,i)=>{if(!row.temporary&&/返工|处罚/.test(String(row.notes?.[i]||'')))reworkNames[n]=id;});const known=TASKS.find(t=>t.id===id);const area=room?'宿舍值日':known?.area==='zone1'||/1号区/.test(row.task)?'1号卫生区':known?.area==='zone2'||/2号区/.test(row.task)?'2号卫生区':'教室与走廊';defs.push({id,label:row.task,area:row.temporary?'临时劳动':area,temporary:!!row.temporary,reworkPeople:row.temporary?names.filter((n,i)=>/返工|处罚/.test(String(row.notes?.[i]||''))):undefined,room:room||undefined,cap:names.length,maleOnly:known?.maleOnly||false,completionKind:row.temporary?(row.completionKind==='rework'?'rework':'normal'):/返工|重做/.test(row.task)?'rework':/临时/.test(row.task)?'extra':'normal'});}if(!defs.length)throw Error(date+'没有安排人员');result.push({date,jobs,defs,reworkNames,className:data.className||state.className});}return result.sort((a,b)=>a.date.localeCompare(b.date));}
 let pendingDuty=[];
@@ -628,7 +628,7 @@ $('savePause').onclick=()=>{
   state.inspections||={};state.inspections[id]={names:JSON.stringify(names(id)),people:copy(p.results),rework:[...p.rework],status:aggregate(p.results)};
   state.carryovers||={};const key=state.date+':'+id;
   if(!p.redo.length)delete state.carryovers[key];
-  else {const def=JOBS.find(j=>j.id===id);state.carryovers[key]={sourceDate:state.date,targetDate:nextDutyDate(state.date),def:{...def,...(def.temporary?{completionKind:'rework'}:{})},names:[...p.redo]};}
+  else {const def=JOBS.find(j=>j.id===id);state.carryovers[key]={sourceDate:state.date,targetDate:nextDutyDate(state.date),def:{...def,...(def.temporary?{completionKind:'rework'}:{})},names:[...p.redo],...(def.room?{individual:p.redo.length!==names(id).length}: {})};}
  }
  function commit(id,p){
   const j=JOBS.find(j=>j.id===id),withdraw=names(id).filter(n=>accepted(id,n)&&!p.pass.includes(n));
@@ -1042,7 +1042,13 @@ function dutyPersonRework(job,name,rework=state.reworkNames){
    select.value=dutyPersonRework(j,n)?'rework':'normal';select.disabled=!!fixed;label.append(select);row.append(label);
    const replace=document.createElement('button'),remove=document.createElement('button');replace.type=remove.type='button';replace.textContent='更换';remove.textContent='移除';replace.disabled=remove.disabled=!!fixed;
    replace.onclick=()=>{row.querySelector('.assignment-choose')?.remove();row.append(choosePerson(n));};
-   remove.onclick=()=>{if(!store())return;if(j.temporary)removeTemporaryPerson(id,n);else removeNames([n]);open(id);};actions.append(replace,remove);row.append(actions);
+   remove.onclick=()=>{if(!store())return;if(j.temporary)removeTemporaryPerson(id,n);else removeNames([n]);open(id);};actions.append(replace,remove);
+   if(!j.temporary&&!fixed&&window.DutyRotation?.owed(n)&&!window.DutyRotation.isMakeup(id,n)){
+    const makeup=document.createElement('button');makeup.type='button';makeup.textContent='标记补班';
+    makeup.onclick=()=>{if(!store())return;window.DutyRotation.mark(id,n);open(id);};
+    actions.append(makeup);
+   }
+   row.append(actions);
    const reason=document.createElement('input');reason.type='text';reason.dataset.reason=n;reason.placeholder='返工原因（选填）';reason.setAttribute('aria-label',n+'返工原因');reason.value=state.reworkReasons?.[id]?.[n]||'';
    const extra=String(j.cloudNotes?.[n]||'').replace(/返工|处罚/g,'').replace(/^[\s·、，；;]+|[\s·、，；;]+$/g,'');
    reason.maxLength=Math.max(0,37-(extra?extra.length+3:0));reason.style.gridColumn='1 / -1';reason.style.width='100%';
@@ -1274,7 +1280,7 @@ function dutyPersonRework(job,name,rework=state.reworkNames){
    if(!cloud.ready())return cloud.open();
    const plans=state.areaTemplates||[];if(!plans.length)return feedback.textContent='请先保存一个模板';upload(plans);
   };dialog.querySelector('.window-footer').prepend(sync);
-  const clear=document.createElement('button');clear.id='clearJobPeople';clear.type='button';clear.textContent='🧹 清空岗位人员';opener.after(clear);
+  const clear=document.createElement('button');clear.id='clearJobPeople';clear.type='button';clear.textContent='🧹';clear.title='清空岗位人员';clear.setAttribute('aria-label',clear.title);opener.after(clear);
   clear.onclick=()=>{
    if(state.layoutLocked||Object.keys(inspectionDraft).length||window.DutyCounts?.isBusy())return tell('请先解锁排版，并完成当前验收或同步');
    const keep=new Map(JOBS.map(j=>[j.id,(state.jobs[j.id]||[]).filter(n=>j.temporary?tempComplete(j.id,n):state.done.includes(n))]));
@@ -1330,6 +1336,11 @@ function dutyPersonRework(job,name,rework=state.reworkNames){
 
  const style=document.createElement('style');
  style.textContent=`.template-dialog{width:min(520px,94vw);box-sizing:border-box}.template-dialog .template-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}.template-dialog label{display:grid;gap:4px;margin:0 0 8px;font-size:13px}.template-dialog input:not([type=checkbox]),.template-dialog select{min-width:0;width:100%;box-sizing:border-box}.template-row{display:grid;grid-template-columns:minmax(0,1fr) 64px 32px;gap:6px;padding:8px 0;border-top:1px solid #dce4dc}.template-row .remove{padding:0;margin:0}.template-dialog .task-flags{grid-column:1/-1;display:flex;gap:12px;flex-wrap:wrap}.template-dialog .task-flags label{display:flex;align-items:center;gap:3px;margin:0}.template-feedback:empty{display:none}.assignment-person input[data-reason][hidden]{display:none!important}`;
+ if(!mobile)style.textContent+=`
+ .auto-controls #areaTemplates,.auto-controls #clearJobPeople{flex:0 0 auto;min-height:38px;margin:0;box-sizing:border-box;white-space:nowrap}
+ .auto-controls #areaTemplates{width:auto;padding:8px 10px;font-size:13px}
+ .auto-controls #clearJobPeople{width:38px;height:38px;min-width:38px;padding:0;font-size:16px;line-height:1}
+ `;
  document.head.append(style);
 })();
 
@@ -1350,6 +1361,183 @@ function dutyPersonRework(job,name,rework=state.reworkNames){
    tell('已获取最新去向，确认后用于 '+date);
   }catch(e){tell(e.message);}finally{button.disabled=false;button.textContent='☁️ 获取云端去向';}
  };
+})();
+
+// The fixed table stays intact. Daily rotation records are replayed from saved plans and acceptance.
+(function(){
+ const weekdays=['周日','周一','周二','周三','周四','周五','周六'];
+ const filter=$('filter');
+ filter.add(new Option('待补班', 'makeup'));
+ let balances=new Map();
+ function applyDormCarryovers(){
+  const past=Object.entries(state.days||{}).filter(([date])=>date<state.date).sort(([a],[b])=>a.localeCompare(b));
+  const occupied=new Set(Object.values(state.jobs).flat());
+  for(const entry of Object.values(state.carryovers||{})){
+   const job=entry.def;
+   if(!job.room||entry.targetDate>state.date||jobAutoBlocked(job.id))continue;
+   const completed=past.some(([date,day])=>date>=entry.targetDate&&day.inspections?.[job.id]?.rework?.some(n=>entry.names.includes(n)));
+   if(completed&&!entry.individual)continue;
+   const room=dormRooms().find(r=>r.room===job.room);
+   const members=(room?.members||[]).map(dormMemberName);
+   for(const n of entry.names){
+    if(!members.includes(n)||occupied.has(n)||!personPresent(n)||state.done.includes(n))continue;
+    if(past.some(([date,day])=>date>=entry.targetDate&&day.inspections?.[job.id]?.rework?.includes(n)))continue;
+    const names=state.jobs[job.id]||=[];
+    const capacity=state.jobCaps?.[job.id]??fixedRoomNames(job.room)?.length??job.cap;
+    if(names.length>=capacity)break;
+    names.push(n);state.reworkNames||={};state.reworkNames[n]=job.id;occupied.add(n);
+    state.carriedDefs||=[];
+    if(!state.carriedDefs.some(d=>d.id===job.id))state.carriedDefs.push({...job,cap:capacity});
+   }
+  }
+ }
+ function entries(day,date){
+  const cloudRows=window.DutyCounts?.hasCurrent()?(state.cloudCounts.ledger.days[date]||[]):null;
+  return (day.rotation?.placements||[]).filter(({id,name})=>{
+   if(!(day.jobs?.[id]||[]).includes(name))return false;
+   if(cloudRows){
+    return cloudRows.some(row=>!row.temporary&&row.entries.some(e=>e.name===name&&e.kind===(id.startsWith('dorm:')?'dorm':'normal')));
+   }
+   return day.done?.includes(name)&&day.reworkNames?.[name]!==id&&!day.inspections?.[id]?.rework?.includes(name);
+  });
+ }
+ function calculate(){
+  const result=new Map();
+  const account=name=>{if(!result.has(name))result.set(name,{owed:false,credit:0});return result.get(name);};
+  const days={...state.days,[state.date]:state};
+  for(const [date,day] of Object.entries(days).sort(([a],[b])=>a.localeCompare(b))){
+   if(date>state.date||!day.rotation)continue;
+   if(date<state.date){
+    for(const name of (day.layoutLocked||day.published?day.rotation.missed:[])||[]){
+     const balance=account(name);if(!balance.credit)balance.owed=true;
+    }
+   }
+   for(const item of entries(day,date)){
+    const balance=account(item.name);
+    if(item.kind==='cover')balance.credit++;
+    if(item.kind==='makeup')balance.owed=false;
+    if(item.relieved)account(item.relieved).credit=Math.max(0,account(item.relieved).credit-1);
+   }
+  }
+  return result;
+ }
+ const archive=archiveDay;
+ archiveDay=function(){
+  archive();
+  if((!state.executionDate||state.executionDate===state.date)&&state.days?.[state.date])state.days[state.date].rotation=structuredClone(state.rotation||null);
+ };
+ const load=loadDay;
+ loadDay=function(date){state.rotation=structuredClone(state.days?.[date]?.rotation||null);return load(date);};
+ function waiting(n){return balances.get(n)?.owed===true&&placeable(n)&&!reworkResting(n);}
+ const visible=visibleNames;
+ visibleNames=function(){const names=visible();return filter.value==='makeup'?names.filter(waiting):names;};
+ const update=render;
+ render=function(){balances=calculate();update();};
+ function ordered(room,date){
+  const start=weekdays.indexOf(state.fixedTemplate||weekdays[new Date(date+'T12:00:00Z').getUTCDay()]);
+  const days=state.fixedDorm.days;
+  return Array.from({length:7},(_,i)=>days[weekdays[(start+i+1)%7]]?.[room]||[]).flat();
+ }
+ function availableSlots(job,roster,blocked,rotation){
+  const current=roster[job.id],room=dormRooms().find(r=>r.room===job.room);
+  if(!room)return;
+  const base=fixedRoomNames(job.room);
+  const members=(room.members||[]).map(dormMemberName);
+  const legal=n=>members.includes(n)&&!blocked.has(n)&&personPresent(n)&&!state.done.includes(n)&&!reworkResting(n);
+  const fallback=members.slice().sort((a,b)=>compareScore(dormScoreFor(a,job.room,state.date),dormScoreFor(b,job.room,state.date)));
+  const orderedNames=base?[...ordered(job.room,state.date),...fallback]:fallback;
+  function fill(name,kind,relieved){
+   current.push(name);blocked.add(name);
+   if(kind)rotation.placements.push({id:job.id,name,kind,...(relieved?{relieved}:{})});
+  }
+  function makeup(){
+   return orderedNames.find(n=>legal(n)&&!base?.includes(n)&&balances.get(n)?.owed);
+  }
+  function nextSubstitute(){
+   return orderedNames.find(n=>legal(n)&&!base?.includes(n)&&!balances.get(n)?.credit);
+  }
+  if(base){
+   const rework=current.filter(n=>state.reworkNames?.[n]===job.id||dutyPersonRework(job,n));
+   const regularSeats=Math.max(0, Math.min(base.length, job.cap) - rework.length);
+   // Only original places left after rework coverage can become a missed shift.
+   const normalBase=base.filter(n=>!rework.includes(n));
+   const present=normalBase.filter(n=>!state.absent.includes(n));
+   const original=present.slice(0,regularSeats);
+   const missed=normalBase.filter(n=>state.absent.includes(n)).slice(0,Math.max(0,regularSeats-original.length));
+   if(state.presenceDate===state.date)rotation.missed.push(...missed);
+   const credited=[];
+   for(const n of original){
+    if(current.length>=job.cap)break;
+    if(!legal(n))continue;
+    if(balances.get(n)?.credit){credited.push(n);continue;}
+    fill(n,balances.get(n)?.owed?'makeup':null);
+   }
+   for(const n of credited){
+    if(current.length>=job.cap)break;
+    const owed=makeup(),substitute=owed||nextSubstitute();
+    if(substitute)fill(substitute,owed?'makeup':'cover',n);
+    else fill(n,null);
+   }
+
+  }
+  while(current.length<job.cap){
+   const owed=makeup();
+   const candidate=owed||nextSubstitute();
+   if(!candidate)break;
+   fill(candidate,owed?'makeup':base&&base.length?'cover':null);
+  }
+ }
+ automatic=function(){
+  if(window.DutyCounts?.isBusy())return tell('正在同步，请稍后');
+  if(state.layoutLocked)return tell('请先点「重新调整」解锁排版');
+  if(Object.keys(inspectionDraft).length)return tell('请先保存或取消验收');
+  if(!NAMES.length)return tell('先导入学生名单');
+  if(state.presenceDate!==state.date&&!confirm('尚未确认这一天的去向。按当前名单补位？'))return;
+  refreshJobs();balances=calculate();
+  if(state.fixedDorm&&!fixedDormDay()&&JOBS.some(j=>j.room&&!jobAutoBlocked(j.id)&&(state.jobs[j.id]||[]).length<j.cap))return tell('固定宿舍表没有当天安排，请选择实际执行的星期表');
+  const beforeCarry=JSON.stringify(state);
+  applyDormCarryovers();refreshJobs();
+  const carryChanged=JSON.stringify(state.jobs)!==JSON.stringify(JSON.parse(beforeCarry).jobs);
+  const roster=structuredClone(state.jobs),occupied=new Set(Object.values(roster).flat());
+  const rotation={missed:[],placements:(state.rotation?.placements||[]).filter(item=>roster[item.id]?.includes(item.name))};
+  const jobs=JOBS.filter(j=>!j.temporary&&!jobAutoBlocked(j.id));
+  for(const job of jobs.filter(j=>j.room))availableSlots(job,roster,occupied,rotation);
+  const candidates=eligibleFor(state.date).map(s=>s.name).filter(n=>!occupied.has(n)&&!state.done.includes(n)&&!balances.get(n)?.owed);
+  const jobsByRestriction=jobs.filter(j=>!j.room).sort((a,b)=>Number(!!b.maleOnly)-Number(!!a.maleOnly));
+  for(const job of jobsByRestriction){
+   const open=job.cap-roster[job.id].length;
+   if(open<=0)continue;
+   const names=candidates.filter(n=>!occupied.has(n)&&canEnter(n,job.id))
+    .sort((a,b)=>compareScore(scoreFor(a,job,state.date),scoreFor(b,job,state.date))).slice(0,open);
+   for(const n of names){roster[job.id].push(n);occupied.add(n);}
+  }
+  const missed=JOBS.filter(j=>!jobAutoBlocked(j.id)&&roster[j.id].length<j.cap);
+  if(carryChanged||JSON.stringify(roster)!==JSON.stringify(state.jobs)||JSON.stringify(rotation)!==JSON.stringify(state.rotation)){
+   if(carryChanged){history.push(beforeCarry);if(history.length>30)history.shift();}else record();
+   for(const job of JOBS){
+    const entry=state.inspections?.[job.id],prior=state.jobs[job.id]||[];
+    if(!entry||entry.names!==JSON.stringify(prior)||prior.length===roster[job.id].length)continue;
+    entry.people=Object.fromEntries(roster[job.id].map(n=>[n,prior.includes(n)?entry.people?.[n]||entry.status:'pending']));
+    entry.names=JSON.stringify(roster[job.id]);
+   }
+   state.jobs=roster;state.rotation=rotation;state.published=false;selected.clear();render();
+  }
+  tell(missed.length?'仍缺人：'+missed.map(j=>j.label+' '+(j.cap-roster[j.id].length)+' 人').join('、'):'空位已补齐');
+ };
+ $('auto').onclick=automatic;
+ window.DutyRotation={
+  applyDormCarryovers,
+  mark(id,name){
+   if(state.layoutLocked||window.DutyCounts?.isBusy()||Object.keys(inspectionDraft).length||state.done.includes(name))return tell('请先完成当前验收或解锁排版');
+   if(!state.jobs[id]?.includes(name)||JOBS.find(j=>j.id===id)?.temporary||!balances.get(name)?.owed)return;
+   record();
+   (state.rotation||={missed:[],placements:[]}).placements=(state.rotation?.placements||[]).filter(p=>p.id!==id||p.name!==name);
+   state.rotation.placements.push({id,name,kind:'makeup'});render();tell('已标记补班，验收合格后结清');
+  },
+  owed:name=>balances.get(name)?.owed===true,
+  isMakeup:(id,name)=>!!state.rotation?.placements.some(p=>p.id===id&&p.name===name&&p.kind==='makeup')
+ };
+ render();
 })();
 
 // Touch-first controls for the portable publisher.
